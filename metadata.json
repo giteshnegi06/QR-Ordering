@@ -1,0 +1,6 @@
+{
+  "name": "Royal Cafe - QR Ordering & Kitchen System",
+  "description": "A complete QR-based ordering system for cafes featuring customer digital menu, live order tracking, kitchen display system (KDS), table QR code generator, and cafe administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

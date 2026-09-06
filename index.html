@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function() {
+        // Prevent "Cannot set property fetch of #<Window> which has only a getter"
+        // by ensuring any getter-only descriptor on window.fetch or globalThis.fetch includes a setter.
+        var origDefProp = Object.defineProperty;
+        var origDefProps = Object.defineProperties;
+
+        Object.defineProperty = function(obj, prop, descriptor) {
+          if ((obj === window || obj === globalThis) && prop === 'fetch' && descriptor) {
+            var origGet = descriptor.get;
+            var origSet = descriptor.set;
+            var currentOverride = null;
+            return origDefProp(obj, prop, {
+              configurable: true,
+              enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+              get: function() {
+                if (currentOverride !== null) return currentOverride;
+                return origGet ? origGet.call(this) : undefined;
+              },
+              set: function(val) {
+                if (origSet) {
+                  origSet.call(this, val);
+                } else {
+                  currentOverride = val;
+                }
+              }
+            });
+          }
+          return origDefProp(obj, prop, descriptor);
+        };
+
+        if (origDefProps) {
+          Object.defineProperties = function(obj, props) {
+            if ((obj === window || obj === globalThis) && props && props.fetch) {
+              Object.defineProperty(obj, 'fetch', props.fetch);
+              var restProps = Object.assign({}, props);
+              delete restProps.fetch;
+              return origDefProps(obj, restProps);
+            }
+            return origDefProps(obj, props);
+          };
+        }
+
+        try {
+          var desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+          if (desc && desc.get && !desc.set && desc.configurable) {
+            var currentVal = null;
+            var existingGet = desc.get;
+            origDefProp(window, 'fetch', {
+              configurable: true,
+              enumerable: desc.enumerable !== undefined ? desc.enumerable : true,
+              get: function() {
+                if (currentVal !== null) return currentVal;
+                return existingGet.call(this);
+              },
+              set: function(val) {
+                currentVal = val;
+              }
+            });
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Royal Cafe - QR Ordering & Kitchen System</title>
+    <meta name="description" content="A complete QR-based ordering system for cafes featuring customer digital menu, live order tracking, kitchen display system (KDS), table QR code generator, and cafe administration." />
+    <meta property="og:title" content="Royal Cafe - QR Ordering & Kitchen System" />
+    <meta property="og:description" content="A complete QR-based ordering system for cafes featuring customer digital menu, live order tracking, kitchen display system (KDS), table QR code generator, and cafe administration." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-stone-50 text-stone-900 font-sans antialiased selection:bg-amber-100 selection:text-amber-900">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
