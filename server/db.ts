@@ -1,76 +1,72 @@
-import pg from 'pg';
+/**
+ * Database layer — uses @neondatabase/serverless Pool over HTTP/fetch.
+ *
+ * Why not pg?  The native `pg` package requires binary addons that Vercel's
+ * bundler cannot include, causing FUNCTION_INVOCATION_FAILED at cold-start.
+ * @neondatabase/serverless Pool talks to Neon over HTTPS with zero native
+ * deps, so it works identically in Vercel serverless functions and Vite dev.
+ */
+
+import { Pool, neonConfig } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Only load .env in non-Vercel environments (Vercel injects env vars directly)
+if (process.env.VERCEL !== '1') {
+  dotenv.config();
+}
 
-// Fallback connection string for local dev when .env is missing.
-// On Vercel, DATABASE_URL must be set in the project's Environment Variables.
-const DEFAULT_URL = 'postgresql://neondb_owner:npg_9rBYzDSUdx8f@ep-gentle-dawn-axbdtdrz-pooler.c-4.us-east-2.aws.neon.tech/QR-Order?sslmode=require';
+// Route Pool queries through fetch (HTTP) instead of WebSocket.
+// Required for Vercel serverless — WebSockets are not available there.
+// Also eliminates the need for the ws package.
+neonConfig.poolQueryViaFetch = true;
 
-let poolPromise: Promise<pg.Pool> | null = null;
+const CONNECTION_STRING =
+  process.env.DATABASE_URL ||
+  'postgresql://neondb_owner:npg_9rBYzDSUdx8f@ep-gentle-dawn-axbdtdrz-pooler.c-4.us-east-2.aws.neon.tech/QR-Order?sslmode=require';
 
-async function createPool(): Promise<pg.Pool> {
-  // Strip channel_binding param — it's not supported by Neon's connection pooler
-  const rawUrl = (process.env.DATABASE_URL || DEFAULT_URL).replace(/[&?]channel_binding=[^&]*/g, '');
-  const url = new URL(rawUrl);
-  const hostname = url.hostname;
+let _pool: Pool | null = null;
 
-  // On Vercel (Linux), DNS resolves fine. On Windows dev machines, Node sometimes
-  // prefers IPv6 and times out — pre-resolve to IPv4 as a workaround.
-  let connectHost = hostname;
-  if (process.platform === 'win32') {
-    try {
-      const dns = await import('dns/promises');
-      const { address } = await dns.lookup(hostname, { family: 4 });
-      connectHost = address;
-      console.log('[DB] Resolved', hostname, '→', connectHost);
-    } catch (err) {
-      console.warn('[DB] IPv4 pre-resolve failed, using hostname directly:', err);
+function getPool(): Pool {
+  if (!_pool) {
+    if (!CONNECTION_STRING) {
+      throw new Error('DATABASE_URL is not set. Please configure it in Vercel Environment Variables or .env file.');
     }
+    
+    console.log('[DB] Initializing connection pool...');
+    console.log('[DB] Connection string preview:', CONNECTION_STRING.substring(0, 35) + '...');
+    
+    _pool = new Pool({ connectionString: CONNECTION_STRING });
+    
+    // Test the connection immediately
+    _pool.query('SELECT 1 as test')
+      .then(() => console.log('[DB] ✅ Connection test successful'))
+      .catch((err) => {
+        console.error('[DB] ❌ Connection test failed:', err.message);
+        _pool = null; // Reset pool so next request can retry
+      });
   }
+  return _pool;
+}
 
-  const pool = new pg.Pool({
-    host: connectHost,
-    port: parseInt(url.port || '5432', 10),
-    user: url.username,
-    password: decodeURIComponent(url.password),
-    database: url.pathname.slice(1).split('?')[0], // strip any leftover query params
-    ssl: {
-      rejectUnauthorized: false,
-      servername: hostname, // Required for Neon SNI even when connecting by IP
-    },
-    max: 5,                        // keep low for serverless — each invocation gets its own pool
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 10000,
-  });
-
-  pool.on('error', (err) => {
-    console.error('[DB Pool Error]', err);
-    poolPromise = null; // reset so next request gets a fresh pool
-  });
-
-  // Verify the connection works at startup
+/**
+ * Drop-in replacement for the old `pg` query helper.
+ * Returns `{ rows: T[] }` so all existing call-sites stay unchanged.
+ */
+export async function query<T = any>(
+  text: string,
+  params: any[] = []
+): Promise<{ rows: T[] }> {
   try {
-    const client = await pool.connect();
-    client.release();
-    console.log('[DB] Connected to Neon PostgreSQL ✓');
-  } catch (err) {
-    console.error('[DB] Initial connection test failed:', err);
-    poolPromise = null;
+    const pool = getPool();
+    const result = await pool.query<T>(text, params);
+    return { rows: result.rows };
+  } catch (err: any) {
+    console.error('[DB Query Error]', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      query: text.substring(0, 100),
+    });
     throw err;
   }
-
-  return pool;
-}
-
-export async function getPool(): Promise<pg.Pool> {
-  if (!poolPromise) {
-    poolPromise = createPool();
-  }
-  return poolPromise;
-}
-
-export async function query(text: string, params: any[] = []) {
-  const pool = await getPool();
-  return pool.query(text, params);
 }

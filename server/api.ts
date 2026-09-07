@@ -19,6 +19,46 @@ apiRouter.get('/docs-json', (req: Request, res: Response) => {
   res.json(swaggerDocument);
 });
 
+// Health check endpoint for debugging deployment issues
+apiRouter.get('/health', async (_req: Request, res: Response) => {
+  try {
+    const hasDb = !!process.env.DATABASE_URL;
+    const dbPreview = process.env.DATABASE_URL ? 
+      process.env.DATABASE_URL.substring(0, 30) + '...' : 'NOT SET';
+    
+    // Try a simple query
+    let dbWorks = false;
+    let dbError = null;
+    try {
+      await query('SELECT 1 as test');
+      dbWorks = true;
+    } catch (e: any) {
+      dbError = e.message;
+    }
+
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      env: {
+        NODE_ENV: process.env.NODE_ENV,
+        VERCEL: process.env.VERCEL,
+        DATABASE_URL_SET: hasDb,
+        DATABASE_URL_PREVIEW: dbPreview,
+      },
+      database: {
+        works: dbWorks,
+        error: dbError,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ 
+      status: 'error', 
+      error: err.message,
+      stack: err.stack 
+    });
+  }
+});
+
 // Helper to map DB cafe to CafeInfo
 function mapCafe(row: any) {
   return {
