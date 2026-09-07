@@ -6,114 +6,17 @@ import { swaggerDocument } from './swagger';
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
 
-// Resolve the actual cafe ID from the DB once and cache it.
-// This avoids hardcoding 'negis-kitchen' when the real ID may differ.
-let _cafeId: string | null = null;
+// Use 'negis-kitchen' as the cafe ID for all operations.
+// This ensures FK constraints work since you want this ID in the database.
+let _cafeId: string | null = 'negis-kitchen';
 async function getCafeId(): Promise<string> {
-  if (_cafeId) return _cafeId;
-  const res = await query('SELECT id FROM cafes LIMIT 1');
-  if (res.rows.length === 0) throw new Error('No cafe found in DB. Please seed the cafes table first.');
-  _cafeId = res.rows[0].id as string;
-  return _cafeId;
+  return _cafeId!;
 }
 
 // Swagger API Documentation UI & JSON endpoint
 apiRouter.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 apiRouter.get('/docs-json', (req: Request, res: Response) => {
   res.json(swaggerDocument);
-});
-
-// ---------------------------------------------------------------------------
-// ONE-TIME MIGRATION: rename cafe id from 'royal-cafe' → 'negis-kitchen'
-// POST /api/migrate-cafe-id   (remove this endpoint after running once)
-// ---------------------------------------------------------------------------
-apiRouter.post('/migrate-cafe-id', async (req: Request, res: Response) => {
-  try {
-    const OLD = 'royal-cafe';
-    const NEW = 'negis-kitchen';
-    const results: Record<string, number> = {};
-
-    const { getPool } = await import('./db');
-    const pool = await getPool();
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      // Find all FK constraints on cafes.id so we can temporarily drop them
-      const fkRes = await client.query(`
-        SELECT
-          tc.constraint_name,
-          tc.table_name,
-          kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-        JOIN information_schema.referential_constraints rc
-          ON tc.constraint_name = rc.constraint_name
-          AND tc.table_schema = rc.constraint_schema
-        JOIN information_schema.key_column_usage ccu
-          ON rc.unique_constraint_name = ccu.constraint_name
-        WHERE tc.constraint_type = 'FOREIGN KEY'
-          AND ccu.table_name = 'cafes'
-          AND ccu.column_name = 'id'
-          AND tc.table_schema = 'public'
-      `);
-
-      const fkConstraints = fkRes.rows;
-      console.log('[migrate] Found FK constraints:', fkConstraints.map((r: any) => `${r.table_name}.${r.constraint_name}`).join(', '));
-
-      // Drop all FK constraints referencing cafes.id
-      for (const fk of fkConstraints) {
-        await client.query(`ALTER TABLE "${fk.table_name}" DROP CONSTRAINT IF EXISTS "${fk.constraint_name}"`);
-        console.log('[migrate] Dropped FK:', fk.constraint_name);
-      }
-
-      // Update the primary key on cafes
-      const cafeRes = await client.query(`UPDATE cafes SET id = $1 WHERE id = $2`, [NEW, OLD]);
-      results['cafes'] = cafeRes.rowCount ?? 0;
-      console.log('[migrate] cafes updated:', results['cafes']);
-
-      // Update all child table cafe_id values
-      for (const t of ['tables', 'categories', 'menu_items', 'orders']) {
-        try {
-          const r = await client.query(`UPDATE "${t}" SET cafe_id = $1 WHERE cafe_id = $2`, [NEW, OLD]);
-          results[t] = r.rowCount ?? 0;
-          console.log(`[migrate] ${t} updated:`, results[t]);
-        } catch (e: any) {
-          console.warn(`[migrate] Skipping ${t}:`, e.message);
-          results[t] = -1;
-        }
-      }
-
-      // Re-add FK constraints pointing to the new ID
-      for (const fk of fkConstraints) {
-        await client.query(`
-          ALTER TABLE "${fk.table_name}"
-          ADD CONSTRAINT "${fk.constraint_name}"
-          FOREIGN KEY ("${fk.column_name}") REFERENCES cafes(id)
-        `);
-        console.log('[migrate] Re-added FK:', fk.constraint_name);
-      }
-
-      await client.query('COMMIT');
-      console.log('[migrate] COMMITTED');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
-
-    // Bust the in-memory cached cafe ID
-    _cafeId = NEW;
-
-    res.json({ success: true, updated: results });
-  } catch (err: any) {
-    console.error('[migrate-cafe-id]', err);
-    res.status(500).json({ error: err.message, detail: err.detail, code: err.code });
-  }
 });
 
 // Helper to map DB cafe to CafeInfo
@@ -174,13 +77,23 @@ function mapMenuItem(row: any) {
 // --- CAFE INFO ---
 apiRouter.get('/cafe', async (req: Request, res: Response) => {
   try {
+    console.log('[GET /cafe] Fetching cafe info...');
     const result = await query('SELECT * FROM cafes LIMIT 1');
     if (result.rows.length === 0) {
+      console.warn('[GET /cafe] No cafe found in database');
       return res.status(404).json({ error: 'Cafe not found' });
     }
-    res.json(mapCafe(result.rows[0]));
+    const cafe = mapCafe(result.rows[0]);
+    console.log('[GET /cafe] Success, cafe id:', cafe.id);
+    res.json(cafe);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[GET /cafe] Error:', err);
+    res.status(500).json({ 
+      error: err.message, 
+      detail: err.detail, 
+      code: err.code,
+      hint: err.hint 
+    });
   }
 });
 
@@ -226,20 +139,36 @@ apiRouter.get('/tables', async (req: Request, res: Response) => {
 
 apiRouter.post('/tables', async (req: Request, res: Response) => {
   try {
+    console.log('[POST /tables] Creating table with body:', JSON.stringify(req.body));
     const t = req.body;
+    if (!t || !t.number) {
+      return res.status(400).json({ error: 'Missing required field: number' });
+    }
+    
     const cafeId = await getCafeId();
+    console.log('[POST /tables] Using cafe_id:', cafeId);
+    
     const cleanNum = t.number.replace(/[^0-9]/g, '') || String(Date.now()).slice(-2);
     const id = `table-${cleanNum}`;
     const code = `table-${cleanNum}`;
+    
     const result = await query(
       `INSERT INTO tables (id, cafe_id, number, code, capacity, status)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [id, cafeId, t.number, code, t.capacity || 4, t.status || 'available']
     );
+    
+    console.log('[POST /tables] Success, created table id:', id);
     res.json(mapTable(result.rows[0]));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[POST /tables] Error:', err);
+    res.status(500).json({ 
+      error: err.message, 
+      detail: err.detail, 
+      code: err.code,
+      hint: err.hint 
+    });
   }
 });
 
@@ -305,19 +234,35 @@ apiRouter.get('/categories', async (req: Request, res: Response) => {
 
 apiRouter.post('/categories', async (req: Request, res: Response) => {
   try {
+    console.log('[POST /categories] Creating category with body:', JSON.stringify(req.body));
     const { name, icon } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Missing required field: name' });
+    }
+    
     const cafeId = await getCafeId();
+    console.log('[POST /categories] Using cafe_id:', cafeId);
+    
     const id = `cat-${Date.now()}`;
     const countRes = await query('SELECT count(*) FROM categories');
     const displayOrder = parseInt(countRes.rows[0].count, 10) + 1;
+    
     const result = await query(
       `INSERT INTO categories (id, cafe_id, name, icon, display_order)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [id, cafeId, name, icon || 'Utensils', displayOrder]
     );
+    
+    console.log('[POST /categories] Success, created category id:', id);
     res.json(mapCategory(result.rows[0]));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[POST /categories] Error:', err);
+    res.status(500).json({ 
+      error: err.message, 
+      detail: err.detail, 
+      code: err.code,
+      hint: err.hint 
+    });
   }
 });
 
@@ -357,8 +302,17 @@ apiRouter.get('/menu', async (req: Request, res: Response) => {
 
 apiRouter.post('/menu', async (req: Request, res: Response) => {
   try {
+    console.log('[POST /menu] Creating menu item with body:', JSON.stringify(req.body));
     const item = req.body;
+    if (!item || !item.name || !item.price || !item.categoryId || !item.vegType) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: name, price, categoryId, vegType' 
+      });
+    }
+    
     const cafeId = await getCafeId();
+    console.log('[POST /menu] Using cafe_id:', cafeId);
+    
     const id = `item-${Date.now()}`;
     const result = await query(
       `INSERT INTO menu_items (id, cafe_id, category_id, name, description, price, veg_type, image_url, is_available, preparation_time_min, customization_groups)
@@ -378,9 +332,17 @@ apiRouter.post('/menu', async (req: Request, res: Response) => {
         JSON.stringify(item.customizationGroups || []),
       ]
     );
+    
+    console.log('[POST /menu] Success, created menu item id:', id);
     res.json(mapMenuItem(result.rows[0]));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[POST /menu] Error:', err);
+    res.status(500).json({ 
+      error: err.message, 
+      detail: err.detail, 
+      code: err.code,
+      hint: err.hint 
+    });
   }
 });
 
