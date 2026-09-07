@@ -1,8 +1,16 @@
 import express, { Request, Response } from 'express';
+import swaggerUi from 'swagger-ui-express';
 import { query } from './db';
+import { swaggerDocument } from './swagger';
 
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
+
+// Swagger API Documentation UI & JSON endpoint
+apiRouter.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+apiRouter.get('/docs-json', (req: Request, res: Response) => {
+  res.json(swaggerDocument);
+});
 
 // Helper to map DB cafe to CafeInfo
 function mapCafe(row: any) {
