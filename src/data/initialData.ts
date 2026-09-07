@@ -1,9 +1,9 @@
 import { CafeInfo, Category, MenuItem, Order, TableItem } from '../types';
 
 export const INITIAL_CAFE: CafeInfo = {
-  id: 'royal-cafe',
-  name: 'Royal Cafe',
-  tagline: 'Artisanal Brews & Gourmet Kitchen',
+  id: 'negis-kitchen',
+  name: "Negi's Kitchen",
+  tagline: 'Home-Style Flavours & Gourmet Kitchen',
   logo: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=200&auto=format&fit=crop&q=80',
   address: '42 Heritage Boulevard, Connaught Place, New Delhi',
   phone: '+91 98765 43210',
@@ -11,7 +11,7 @@ export const INITIAL_CAFE: CafeInfo = {
   taxPercent: 5, // 5% GST
   serviceChargePercent: 0,
   isAcceptingOrders: true,
-  upiId: 'royalcafe@upi',
+  upiId: 'negiskitchen@upi',
 };
 
 export const INITIAL_TABLES: TableItem[] = [
@@ -385,7 +385,7 @@ export const INITIAL_MENU_ITEMS: MenuItem[] = [
 export const INITIAL_SAMPLE_ORDERS: Order[] = [
   {
     id: 'ORD-1022',
-    cafeId: 'royal-cafe',
+    cafeId: 'negis-kitchen',
     tableId: 'table-02',
     tableNumber: 'Table 02',
     items: [
@@ -427,7 +427,7 @@ export const INITIAL_SAMPLE_ORDERS: Order[] = [
   },
   {
     id: 'ORD-1023',
-    cafeId: 'royal-cafe',
+    cafeId: 'negis-kitchen',
     tableId: 'table-03',
     tableNumber: 'Table 03',
     items: [
@@ -477,7 +477,7 @@ export const INITIAL_SAMPLE_ORDERS: Order[] = [
   },
   {
     id: 'ORD-1024',
-    cafeId: 'royal-cafe',
+    cafeId: 'negis-kitchen',
     tableId: 'table-05',
     tableNumber: 'Table 05',
     items: [

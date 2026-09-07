@@ -9,8 +9,9 @@ export interface TableQRData {
 }
 
 export async function generateTableQRDataUrl(cafeId: string, tableId: string): Promise<string> {
+  const safeCafeId = (!cafeId || cafeId === 'royal-cafe' || cafeId === 'royal_cafe') ? 'negis-kitchen' : cafeId;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const url = `${origin}/menu/${cafeId}/${tableId}`;
+  const url = `${origin}/menu/${safeCafeId}/${tableId}`;
   
   try {
     return await QRCode.toDataURL(url, {
@@ -29,8 +30,9 @@ export async function generateTableQRDataUrl(cafeId: string, tableId: string): P
 }
 
 export function getTableMenuUrl(cafeId: string, tableId: string): string {
+  const safeCafeId = (!cafeId || cafeId === 'royal-cafe' || cafeId === 'royal_cafe') ? 'negis-kitchen' : cafeId;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `${origin}/menu/${cafeId}/${tableId}`;
+  return `${origin}/menu/${safeCafeId}/${tableId}`;
 }
 
 export async function downloadTableQRCode(cafeName: string, tableNumber: string, qrDataUrl: string) {

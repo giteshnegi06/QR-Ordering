@@ -6,17 +6,23 @@ import { KitchenView } from './components/kitchen/KitchenView';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminLogin } from './components/admin/AdminLogin';
 import {
-  Smartphone,
   ChefHat,
-  ShieldAlert,
   Store,
-  Layers,
-  Sparkles,
-  ArrowRight,
-  ExternalLink,
 } from 'lucide-react';
 
-type AppView = 'customer' | 'kitchen' | 'admin';
+// Detect if the current URL is a customer QR menu URL: /menu/{cafeId}/{tableId}
+function getQRMenuTableId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/\/menu\/[^/]+\/([^/]+)/);
+  if (match && match[1]) return match[1];
+  // Also support ?table=xxx as a fallback (for manual/dev links)
+  const params = new URLSearchParams(window.location.search);
+  const tableParam = params.get('table');
+  if (tableParam) return tableParam;
+  return null;
+}
+
+type StaffView = 'kitchen' | 'admin';
 
 export const App: React.FC = () => {
   // State from Storage Service
@@ -26,8 +32,11 @@ export const App: React.FC = () => {
   const [tables, setTables] = useState<TableItem[]>(() => storageService.getTables());
   const [orders, setOrders] = useState<Order[]>(() => storageService.getOrders());
 
-  // Current Route / View
-  const [currentView, setCurrentView] = useState<AppView>(() => {
+  // Detect if this is a QR-scanned customer session
+  const [qrTableId] = useState<string | null>(() => getQRMenuTableId());
+
+  // Staff view state (only relevant when NOT in customer QR mode)
+  const [staffView, setStaffView] = useState<StaffView>(() => {
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     const search = window.location.search.toLowerCase();
@@ -35,25 +44,7 @@ export const App: React.FC = () => {
     if (path.includes('/kitchen') || hash.includes('kitchen') || search.includes('view=kitchen')) {
       return 'kitchen';
     }
-    if (path.includes('/admin') || hash.includes('admin') || search.includes('view=admin')) {
-      return 'admin';
-    }
-    return 'customer';
-  });
-
-  // Current active table (for customer menu)
-  const [activeTableId, setActiveTableId] = useState<string>(() => {
-    // Check path for /menu/{cafeId}/{tableId}
-    const path = window.location.pathname;
-    const match = path.match(/\/menu\/[^/]+\/([^/]+)/);
-    if (match && match[1]) {
-      return match[1];
-    }
-    const params = new URLSearchParams(window.location.search);
-    const tableParam = params.get('table');
-    if (tableParam) return tableParam;
-
-    return 'table-05'; // Default demo table: Table 05
+    return 'admin';
   });
 
   // Admin authentication state
@@ -74,23 +65,10 @@ export const App: React.FC = () => {
     return unsubscribe;
   }, []);
 
-  // Update browser URL / history when view changes
-  const navigateToView = (view: AppView, tableId?: string) => {
-    setCurrentView(view);
-    if (tableId) {
-      setActiveTableId(tableId);
-    }
-
-    let newUrl = window.location.pathname;
-    if (view === 'customer') {
-      const tid = tableId || activeTableId;
-      newUrl = `/menu/${cafe.id}/${tid}`;
-    } else if (view === 'kitchen') {
-      newUrl = '/kitchen';
-    } else if (view === 'admin') {
-      newUrl = '/admin';
-    }
-
+  // Navigate between staff views and update URL
+  const navigateToStaffView = (view: StaffView) => {
+    setStaffView(view);
+    const newUrl = view === 'kitchen' ? '/kitchen' : '/admin';
     try {
       window.history.pushState({}, '', newUrl);
     } catch (e) {
@@ -98,25 +76,14 @@ export const App: React.FC = () => {
     }
   };
 
-  // Find active table details
-  const currentTable = tables.find(
-    (t) => t.code === activeTableId || t.id === activeTableId || t.number.toLowerCase() === activeTableId.toLowerCase()
-  ) || tables[0] || {
-    id: 'table-05',
-    number: 'Table 05',
-    capacity: 4,
-    status: 'occupied',
-    code: 'table-05',
-  };
-
   // Admin handlers
   const handleAdminLogin = (email: string, role: 'admin' | 'kitchen') => {
     if (role === 'kitchen') {
-      navigateToView('kitchen');
+      navigateToStaffView('kitchen');
     } else {
       setIsAdminLoggedIn(true);
       sessionStorage.setItem('cafe_admin_logged_in', 'true');
-      navigateToView('admin');
+      navigateToStaffView('admin');
     }
   };
 
@@ -125,11 +92,19 @@ export const App: React.FC = () => {
     sessionStorage.removeItem('cafe_admin_logged_in');
   };
 
+  // ─── CUSTOMER QR MENU ROUTE ───────────────────────────────────────────────
+  // If the URL is /menu/{cafeId}/{tableId}, render ONLY the customer view.
+  // No nav bar, no staff controls — the customer only sees the menu.
+  if (qrTableId !== null) {
+    return <CustomerView tableId={qrTableId} />;
+  }
+
+  // ─── STAFF INTERFACE ──────────────────────────────────────────────────────
+  // Kitchen & Admin views. The customer menu is NOT accessible from here —
+  // customers must scan a QR code to access the menu.
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col font-sans">
-      {/* Top Universal System Navigation Bar
-          Enables quick testing and switching between the 3 core requirements:
-          1. Customer QR Menu, 2. Kitchen KDS, 3. Cafe Admin */}
+      {/* Staff Navigation Bar */}
       <nav className="bg-stone-950 text-white border-b border-stone-800 sticky top-0 z-50 text-xs px-3 sm:px-6 py-2 shadow-md">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
           {/* Logo / Cafe badge */}
@@ -143,24 +118,12 @@ export const App: React.FC = () => {
             </span>
           </div>
 
-          {/* Interface Switcher Tabs */}
+          {/* Staff Interface Switcher */}
           <div className="flex items-center gap-1 bg-stone-900 p-1 rounded-xl border border-stone-800">
             <button
-              onClick={() => navigateToView('customer')}
+              onClick={() => navigateToStaffView('kitchen')}
               className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                currentView === 'customer'
-                  ? 'bg-amber-500 text-stone-950 shadow-xs'
-                  : 'text-stone-300 hover:text-white'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Customer Menu</span>
-            </button>
-
-            <button
-              onClick={() => navigateToView('kitchen')}
-              className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                currentView === 'kitchen'
+                staffView === 'kitchen'
                   ? 'bg-amber-500 text-stone-950 shadow-xs'
                   : 'text-stone-300 hover:text-white'
               }`}
@@ -173,9 +136,9 @@ export const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => navigateToView('admin')}
+              onClick={() => navigateToStaffView('admin')}
               className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                currentView === 'admin'
+                staffView === 'admin'
                   ? 'bg-amber-500 text-stone-950 shadow-xs'
                   : 'text-stone-300 hover:text-white'
               }`}
@@ -185,40 +148,24 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Table Selector (Simulates scanning different table QR codes) */}
-          {currentView === 'customer' && (
-            <div className="flex items-center gap-1.5 text-stone-400">
-              <span className="text-[11px] hidden sm:inline">Simulated Table QR:</span>
-              <select
-                value={activeTableId}
-                onChange={(e) => navigateToView('customer', e.target.value)}
-                className="bg-stone-800 text-amber-300 text-xs font-black py-1 px-2.5 rounded-lg border border-stone-700 focus:outline-none focus:border-amber-500 cursor-pointer"
-              >
-                {tables.map((t) => (
-                  <option key={t.id} value={t.code || t.id}>
-                    {t.number}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* QR scan hint */}
+          <div className="hidden sm:flex items-center gap-1.5 text-stone-500 text-[10px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
+            <span>Customer menu accessible via QR scan only</span>
+          </div>
         </div>
       </nav>
 
-      {/* View Router */}
+      {/* Staff View Router */}
       <div className="flex-1 flex flex-col">
-        {currentView === 'customer' && (
-          <CustomerView tableId={currentTable.code || currentTable.id} />
-        )}
-
-        {currentView === 'kitchen' && (
+        {staffView === 'kitchen' && (
           <KitchenView
-            onSwitchToCustomer={(tableId) => navigateToView('customer', tableId)}
-            onSwitchToAdmin={() => navigateToView('admin')}
+            onSwitchToCustomer={() => {}}
+            onSwitchToAdmin={() => navigateToStaffView('admin')}
           />
         )}
 
-        {currentView === 'admin' &&
+        {staffView === 'admin' &&
           (isAdminLoggedIn ? (
             <AdminLayout
               cafe={cafe}
@@ -238,8 +185,12 @@ export const App: React.FC = () => {
               onAddTable={(table) => storageService.addTable(table)}
               onUpdateTable={(id, updates) => storageService.updateTable(id, updates)}
               onDeleteTable={(id) => storageService.deleteTable(id)}
-              onOpenCustomerMenu={(tId) => navigateToView('customer', tId || activeTableId)}
-              onOpenKitchen={() => navigateToView('kitchen')}
+              onOpenCustomerMenu={(tableId) => {
+                // Customer menu is QR-only — open in a new tab for admin preview
+                const tid = tableId || tables[0]?.code || tables[0]?.id || 'table-01';
+                window.open(`/menu/${cafe.id}/${tid}`, '_blank');
+              }}
+              onOpenKitchen={() => navigateToStaffView('kitchen')}
               onLogout={handleAdminLogout}
             />
           ) : (

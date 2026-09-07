@@ -3,16 +3,16 @@ import { INITIAL_CAFE, INITIAL_CATEGORIES, INITIAL_MENU_ITEMS, INITIAL_SAMPLE_OR
 import { soundService } from './sound';
 
 const STORAGE_KEYS = {
-  CAFE: 'royal_cafe_info',
-  TABLES: 'royal_cafe_tables',
-  CATEGORIES: 'royal_cafe_categories',
-  MENU_ITEMS: 'royal_cafe_menu_items',
-  ORDERS: 'royal_cafe_orders',
-  ORDER_SEQ: 'royal_cafe_order_seq',
-  ACTIVE_TABLE_ID: 'royal_cafe_active_table_id',
-  CUSTOMER_LAST_ORDER_ID: 'royal_cafe_customer_last_order',
-  CUSTOMER_ORDER_IDS: 'royal_cafe_customer_order_ids',
-  ADMIN_AUTH: 'royal_cafe_admin_auth',
+  CAFE: 'negis_kitchen_info',
+  TABLES: 'negis_kitchen_tables',
+  CATEGORIES: 'negis_kitchen_categories',
+  MENU_ITEMS: 'negis_kitchen_menu_items',
+  ORDERS: 'negis_kitchen_orders',
+  ORDER_SEQ: 'negis_kitchen_order_seq',
+  ACTIVE_TABLE_ID: 'negis_kitchen_active_table_id',
+  CUSTOMER_LAST_ORDER_ID: 'negis_kitchen_customer_last_order',
+  CUSTOMER_ORDER_IDS: 'negis_kitchen_customer_order_ids',
+  ADMIN_AUTH: 'negis_kitchen_admin_auth',
 };
 
 type EventType =
@@ -34,7 +34,7 @@ class StorageService {
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
-        this.broadcastChannel = new BroadcastChannel('royal_cafe_sync_channel');
+        this.broadcastChannel = new BroadcastChannel('negis_kitchen_sync_channel');
         this.broadcastChannel.onmessage = (event) => {
           if (event.data && event.data.type) {
             this.notifyLocal(event.data.type, event.data.payload);
@@ -58,12 +58,123 @@ class StorageService {
         }
       });
 
-      // Auto-promote any round (or whole order, for legacy orders without
-      // rounds) whose prep countdown has hit zero straight to "ready", so
-      // the kitchen/customer don't have to wait on a manual click.
+      // Auto-promote any round whose prep countdown has hit zero straight to "ready"
       setInterval(() => this.autoAdvanceReadyOrders(), 2000);
+
+      // Initial cloud sync from Neon database
+      this.syncFromServer();
+
+      // Real-time background sync across devices every 3 seconds
+      setInterval(() => this.pollOrdersAndTables(), 3000);
     }
   }
+
+  private async apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T | null> {
+    if (typeof window === 'undefined') return null;
+    try {
+      const res = await fetch(`/api${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async syncFromServer(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const [cafe, tables, categories, menuItems, orders] = await Promise.all([
+        this.apiFetch<CafeInfo>('/cafe'),
+        this.apiFetch<TableItem[]>('/tables'),
+        this.apiFetch<Category[]>('/categories'),
+        this.apiFetch<MenuItem[]>('/menu'),
+        this.apiFetch<Order[]>('/orders'),
+      ]);
+
+      if (cafe) {
+        localStorage.setItem(STORAGE_KEYS.CAFE, JSON.stringify(cafe));
+        this.notifyLocal('CAFE_UPDATED', cafe);
+      }
+      if (tables && tables.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(tables));
+        this.notifyLocal('TABLES_UPDATED', tables);
+      }
+      if (categories && categories.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+        this.notifyLocal('CATEGORIES_UPDATED', categories);
+      }
+      if (menuItems && menuItems.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(menuItems));
+        this.notifyLocal('MENU_UPDATED', menuItems);
+      }
+      if (orders) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+        this.notifyLocal('ORDERS_UPDATED', orders);
+      }
+    } catch {
+      // offline fallback
+    }
+  }
+
+  private async pollOrdersAndTables(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const [serverOrders, tables] = await Promise.all([
+        this.apiFetch<Order[]>('/orders'),
+        this.apiFetch<TableItem[]>('/tables'),
+      ]);
+
+      if (serverOrders && serverOrders.length > 0) {
+        const currentOrders = this.getOrders();
+        const currentIds = new Set(currentOrders.map((o) => o.id));
+        const hasNew = serverOrders.some((o) => !currentIds.has(o.id));
+
+        // Merge server orders with local orders: preserve any locally-created
+        // orders that haven't been persisted to the server yet.
+        const serverIds = new Set(serverOrders.map((o) => o.id));
+        const localOnly = currentOrders.filter((o) => !serverIds.has(o.id));
+
+        // Server orders with rounds=[] should inherit status from local copy
+        // to avoid the auto-serve race condition.
+        const mergedOrders = serverOrders.map((serverOrder) => {
+          const localCopy = currentOrders.find((lo) => lo.id === serverOrder.id);
+          if (localCopy && (!serverOrder.rounds || serverOrder.rounds.length === 0) && localCopy.rounds && localCopy.rounds.length > 0) {
+            // Server hasn't returned round data yet — keep local copy intact
+            return localCopy;
+          }
+          return serverOrder;
+        });
+
+        const merged = [...mergedOrders, ...localOnly];
+        const isDifferent = JSON.stringify(merged) !== JSON.stringify(currentOrders);
+
+        if (isDifferent) {
+          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(merged));
+          if (hasNew) {
+            const newest = serverOrders[0];
+            this.notify('NEW_ORDER', newest);
+          }
+          this.notify('ORDERS_UPDATED', merged);
+        }
+      }
+      // If server returns empty array, do NOT overwrite local orders —
+      // the DB may not be seeded yet or could be temporarily unavailable.
+
+      if (tables && tables.length > 0) {
+        const currentTables = this.getTables();
+        if (JSON.stringify(tables) !== JSON.stringify(currentTables)) {
+          localStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(tables));
+          this.notify('TABLES_UPDATED', tables);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
 
   private autoAdvanceReadyOrders(): void {
     const orders = this.getOrders();
@@ -84,6 +195,9 @@ class StorageService {
           }
         }
 
+        // Only recompute aggregate if we actually have round data.
+        // An empty rounds array means data hasn't synced yet — do NOT
+        // change the order status (avoids the auto-serve bug).
         const aggregateStatus = this.computeAggregateOrderStatus(order.rounds);
         if (aggregateStatus !== order.status) {
           order.status = aggregateStatus;
@@ -103,6 +217,7 @@ class StorageService {
           changed = true;
         }
       }
+      // If order.rounds is empty and status is 'received'/'ready' — leave it alone.
     }
 
     if (changed) {
@@ -166,7 +281,16 @@ class StorageService {
   public getCafe(): CafeInfo {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.CAFE);
-      return data ? JSON.parse(data) : INITIAL_CAFE;
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed && parsed.id !== 'negis-kitchen') {
+          parsed.id = 'negis-kitchen';
+          parsed.name = "Negi's Kitchen";
+          localStorage.setItem(STORAGE_KEYS.CAFE, JSON.stringify(parsed));
+        }
+        return parsed;
+      }
+      return INITIAL_CAFE;
     } catch {
       return INITIAL_CAFE;
     }
@@ -175,6 +299,7 @@ class StorageService {
   public updateCafe(cafe: CafeInfo): CafeInfo {
     localStorage.setItem(STORAGE_KEYS.CAFE, JSON.stringify(cafe));
     this.notify('CAFE_UPDATED', cafe);
+    this.apiFetch('/cafe', { method: 'PUT', body: JSON.stringify(cafe) });
     return cafe;
   }
 
@@ -207,6 +332,7 @@ class StorageService {
     };
     tables.push(newTable);
     this.saveTables(tables);
+    this.apiFetch('/tables', { method: 'POST', body: JSON.stringify(table) });
     return newTable;
   }
 
@@ -216,12 +342,14 @@ class StorageService {
     if (idx === -1) return null;
     tables[idx] = { ...tables[idx], ...updates };
     this.saveTables(tables);
+    this.apiFetch(`/tables/${id}`, { method: 'PATCH', body: JSON.stringify(updates) });
     return tables[idx];
   }
 
   public deleteTable(id: string): boolean {
     const tables = this.getTables().filter((t) => t.id !== id);
     this.saveTables(tables);
+    this.apiFetch(`/tables/${id}`, { method: 'DELETE' });
     return true;
   }
 
@@ -252,6 +380,7 @@ class StorageService {
     };
     cats.push(newCat);
     this.saveCategories(cats);
+    this.apiFetch('/categories', { method: 'POST', body: JSON.stringify({ name, icon }) });
     return newCat;
   }
 
@@ -265,12 +394,14 @@ class StorageService {
       ...(icon ? { icon } : {}),
     };
     this.saveCategories(cats);
+    this.apiFetch(`/categories/${id}`, { method: 'PUT', body: JSON.stringify({ name, icon }) });
     return cats[idx];
   }
 
   public deleteCategory(id: string): boolean {
     const cats = this.getCategories().filter((c) => c.id !== id);
     this.saveCategories(cats);
+    this.apiFetch(`/categories/${id}`, { method: 'DELETE' });
     return true;
   }
 
@@ -297,6 +428,7 @@ class StorageService {
     };
     items.push(newItem);
     this.saveMenuItems(items);
+    this.apiFetch('/menu', { method: 'POST', body: JSON.stringify(itemData) });
     return newItem;
   }
 
@@ -306,6 +438,7 @@ class StorageService {
     if (idx === -1) return null;
     items[idx] = { ...items[idx], ...updates };
     this.saveMenuItems(items);
+    this.apiFetch(`/menu/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
     return items[idx];
   }
 
@@ -315,6 +448,7 @@ class StorageService {
     if (!item) return false;
     item.isAvailable = !item.isAvailable;
     this.saveMenuItems(items);
+    this.apiFetch(`/menu/${id}/availability`, { method: 'PATCH' });
     return item.isAvailable;
   }
 
@@ -325,6 +459,7 @@ class StorageService {
   public deleteMenuItem(id: string): boolean {
     const items = this.getMenuItems().filter((i) => i.id !== id);
     this.saveMenuItems(items);
+    this.apiFetch(`/menu/${id}`, { method: 'DELETE' });
     return true;
   }
 
@@ -460,11 +595,15 @@ class StorageService {
 
       this.saveOrders(orders);
       this.addCustomerOrderId(existingActiveOrder.id);
-      // The kitchen chime plays where 'NEW_ORDER' is received (KitchenView),
-      // not here, so it fires correctly even when the order was placed from
-      // a different tab/device than the one displaying the kitchen screen.
       this.notify('NEW_ORDER', existingActiveOrder);
       this.notify('ORDERS_UPDATED', orders);
+
+      // Persist merged order round to Neon
+      this.apiFetch<Order>(`/orders${options?.forceNewOrder ? '?force=true' : ''}`, {
+        method: 'POST',
+        body: JSON.stringify(orderData),
+      }).catch(() => {});
+
       return existingActiveOrder;
     }
 
@@ -505,12 +644,26 @@ class StorageService {
     // Store for customer tracking persistence
     this.addCustomerOrderId(id);
 
-    // The kitchen chime plays where 'NEW_ORDER' is received (KitchenView),
-    // not here, so it fires correctly even when the order was placed from
-    // a different tab/device than the one displaying the kitchen screen.
-
     // Broadcast new order specifically
     this.notify('NEW_ORDER', newOrder);
+
+    // Persist new order to Neon and update client ID when server responds
+    this.apiFetch<Order>(`/orders${options?.forceNewOrder ? '?force=true' : ''}`, {
+      method: 'POST',
+      body: JSON.stringify(orderData),
+    })
+      .then((serverOrder) => {
+        if (serverOrder) {
+          const cur = this.getOrders();
+          const idx = cur.findIndex((o) => o.id === id || o.id === serverOrder.id);
+          if (idx >= 0) {
+            cur[idx] = serverOrder;
+            this.saveOrders(cur);
+            this.addCustomerOrderId(serverOrder.id);
+          }
+        }
+      })
+      .catch(() => {});
 
     return newOrder;
   }
@@ -618,6 +771,10 @@ class StorageService {
   // keeps the order at "preparing" (it's flagged separately for the kitchen to
   // accept) instead of pretending nothing changed or restarting the whole order.
   private computeAggregateOrderStatus(rounds: OrderRound[]): OrderStatus {
+    // Guard: if no round data exists yet (sync hasn't completed), keep the
+    // order at 'received' rather than accidentally marking it 'served'.
+    if (!rounds || rounds.length === 0) return 'received';
+
     if (rounds.every((r) => r.status === 'served')) return 'served';
     if (rounds.every((r) => r.status === 'cancelled')) return 'cancelled';
 
@@ -702,6 +859,7 @@ class StorageService {
 
     this.saveOrders(orders);
     soundService.playStatusUpdateBlip();
+    this.apiFetch(`/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
     return order;
   }
 
@@ -747,6 +905,10 @@ class StorageService {
 
     this.saveOrders(orders);
     soundService.playStatusUpdateBlip();
+    this.apiFetch(`/orders/${orderId}/rounds/${roundNumber}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
     return order;
   }
 
@@ -784,6 +946,10 @@ class StorageService {
 
     this.saveOrders(orders);
     soundService.playStatusUpdateBlip();
+    this.apiFetch(`/orders/${orderId}/prep-time`, {
+      method: 'PATCH',
+      body: JSON.stringify({ additionalOrTotalMinutes, isAdjustment, roundNumber }),
+    });
     return order;
   }
 
