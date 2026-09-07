@@ -4,15 +4,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const rawUrl = process.env.DATABASE_URL;
+const DEFAULT_URL = 'postgresql://neondb_owner:npg_9rBYzDSUdx8f@ep-gentle-dawn-axbdtdrz-pooler.c-4.us-east-2.aws.neon.tech/QR-Order?sslmode=require&channel_binding=require';
 
 let poolPromise: Promise<pg.Pool> | null = null;
 
 async function createPool(): Promise<pg.Pool> {
-  if (!rawUrl) {
-    throw new Error('DATABASE_URL environment variable is missing. Please define it in your .env file or environment settings.');
-  }
-  const url = new URL(rawUrl);
+  const connectionString = process.env.DATABASE_URL || DEFAULT_URL;
+  const url = new URL(connectionString);
   const hostname = url.hostname;
 
   // Resolve IPv4 directly to bypass Windows / Node IPv6 connection timeouts

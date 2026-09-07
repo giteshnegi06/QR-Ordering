@@ -20,4 +20,10 @@ app.use((req, res, next) => {
 app.use('/api', apiRouter);
 app.use('/', apiRouter);
 
+// Global Error Handler to prevent Vercel FUNCTION_INVOCATION_FAILED crashes
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[Vercel Serverless Error]:', err);
+  res.status(500).json({ error: err?.message || 'Internal Server Error' });
+});
+
 export default app;
