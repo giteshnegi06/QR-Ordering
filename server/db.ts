@@ -1,4 +1,4 @@
-﻿import dns from 'dns/promises';
+import dns from 'dns/promises';
 import pg from 'pg';
 import dotenv from 'dotenv';
 
@@ -10,29 +10,12 @@ const rawUrl = process.env.DATABASE_URL || DEFAULT_URL;
 let poolPromise: Promise<pg.Pool> | null = null;
 
 async function createPool(): Promise<pg.Pool> {
-  const url = new URL(rawUrl);
-  const hostname = url.hostname;
-
-  // Resolve IPv4 directly to bypass any Windows / Node IPv6 timeouts
-  let connectHost = hostname;
-  try {
-    const { address } = await dns.lookup(hostname, { family: 4 });
-    connectHost = address;
-  } catch (err) {
-    console.warn('[DB] Failed IPv4 pre-resolve, using hostname:', err);
-  }
-
   const pool = new pg.Pool({
-    host: connectHost,
-    port: parseInt(url.port || '5432', 10),
-    user: url.username,
-    password: decodeURIComponent(url.password),
-    database: url.pathname.slice(1),
+    connectionString: rawUrl,
     ssl: {
       rejectUnauthorized: false,
-      servername: hostname, // Required by Neon SNI
     },
-    max: 20,
+    max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
