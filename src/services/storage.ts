@@ -71,8 +71,12 @@ class StorageService {
 
   private async apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T | null> {
     if (typeof window === 'undefined') return null;
+    // VITE_API_URL lets you point the frontend at a different backend origin.
+    // In normal usage (Vite dev + Vercel) both frontend and API share the same
+    // origin, so the default relative /api path works without any configuration.
+    const apiBase = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
     try {
-      const res = await fetch(`/api${endpoint}`, {
+      const res = await fetch(`${apiBase}${endpoint}`, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
       });

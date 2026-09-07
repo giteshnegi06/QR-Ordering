@@ -6,10 +6,114 @@ import { swaggerDocument } from './swagger';
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
 
+// Resolve the actual cafe ID from the DB once and cache it.
+// This avoids hardcoding 'negis-kitchen' when the real ID may differ.
+let _cafeId: string | null = null;
+async function getCafeId(): Promise<string> {
+  if (_cafeId) return _cafeId;
+  const res = await query('SELECT id FROM cafes LIMIT 1');
+  if (res.rows.length === 0) throw new Error('No cafe found in DB. Please seed the cafes table first.');
+  _cafeId = res.rows[0].id as string;
+  return _cafeId;
+}
+
 // Swagger API Documentation UI & JSON endpoint
 apiRouter.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 apiRouter.get('/docs-json', (req: Request, res: Response) => {
   res.json(swaggerDocument);
+});
+
+// ---------------------------------------------------------------------------
+// ONE-TIME MIGRATION: rename cafe id from 'royal-cafe' → 'negis-kitchen'
+// POST /api/migrate-cafe-id   (remove this endpoint after running once)
+// ---------------------------------------------------------------------------
+apiRouter.post('/migrate-cafe-id', async (req: Request, res: Response) => {
+  try {
+    const OLD = 'royal-cafe';
+    const NEW = 'negis-kitchen';
+    const results: Record<string, number> = {};
+
+    const { getPool } = await import('./db');
+    const pool = await getPool();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Find all FK constraints on cafes.id so we can temporarily drop them
+      const fkRes = await client.query(`
+        SELECT
+          tc.constraint_name,
+          tc.table_name,
+          kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.referential_constraints rc
+          ON tc.constraint_name = rc.constraint_name
+          AND tc.table_schema = rc.constraint_schema
+        JOIN information_schema.key_column_usage ccu
+          ON rc.unique_constraint_name = ccu.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_name = 'cafes'
+          AND ccu.column_name = 'id'
+          AND tc.table_schema = 'public'
+      `);
+
+      const fkConstraints = fkRes.rows;
+      console.log('[migrate] Found FK constraints:', fkConstraints.map((r: any) => `${r.table_name}.${r.constraint_name}`).join(', '));
+
+      // Drop all FK constraints referencing cafes.id
+      for (const fk of fkConstraints) {
+        await client.query(`ALTER TABLE "${fk.table_name}" DROP CONSTRAINT IF EXISTS "${fk.constraint_name}"`);
+        console.log('[migrate] Dropped FK:', fk.constraint_name);
+      }
+
+      // Update the primary key on cafes
+      const cafeRes = await client.query(`UPDATE cafes SET id = $1 WHERE id = $2`, [NEW, OLD]);
+      results['cafes'] = cafeRes.rowCount ?? 0;
+      console.log('[migrate] cafes updated:', results['cafes']);
+
+      // Update all child table cafe_id values
+      for (const t of ['tables', 'categories', 'menu_items', 'orders']) {
+        try {
+          const r = await client.query(`UPDATE "${t}" SET cafe_id = $1 WHERE cafe_id = $2`, [NEW, OLD]);
+          results[t] = r.rowCount ?? 0;
+          console.log(`[migrate] ${t} updated:`, results[t]);
+        } catch (e: any) {
+          console.warn(`[migrate] Skipping ${t}:`, e.message);
+          results[t] = -1;
+        }
+      }
+
+      // Re-add FK constraints pointing to the new ID
+      for (const fk of fkConstraints) {
+        await client.query(`
+          ALTER TABLE "${fk.table_name}"
+          ADD CONSTRAINT "${fk.constraint_name}"
+          FOREIGN KEY ("${fk.column_name}") REFERENCES cafes(id)
+        `);
+        console.log('[migrate] Re-added FK:', fk.constraint_name);
+      }
+
+      await client.query('COMMIT');
+      console.log('[migrate] COMMITTED');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Bust the in-memory cached cafe ID
+    _cafeId = NEW;
+
+    res.json({ success: true, updated: results });
+  } catch (err: any) {
+    console.error('[migrate-cafe-id]', err);
+    res.status(500).json({ error: err.message, detail: err.detail, code: err.code });
+  }
 });
 
 // Helper to map DB cafe to CafeInfo
@@ -101,7 +205,7 @@ apiRouter.put('/cafe', async (req: Request, res: Response) => {
         c.serviceChargePercent || 0,
         c.isAcceptingOrders ?? true,
         c.upiId || '',
-        c.id || 'negis-kitchen',
+        c.id || await getCafeId(),
       ]
     );
     res.json(mapCafe(result.rows[0]));
@@ -123,6 +227,7 @@ apiRouter.get('/tables', async (req: Request, res: Response) => {
 apiRouter.post('/tables', async (req: Request, res: Response) => {
   try {
     const t = req.body;
+    const cafeId = await getCafeId();
     const cleanNum = t.number.replace(/[^0-9]/g, '') || String(Date.now()).slice(-2);
     const id = `table-${cleanNum}`;
     const code = `table-${cleanNum}`;
@@ -130,7 +235,7 @@ apiRouter.post('/tables', async (req: Request, res: Response) => {
       `INSERT INTO tables (id, cafe_id, number, code, capacity, status)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [id, 'negis-kitchen', t.number, code, t.capacity || 4, t.status || 'available']
+      [id, cafeId, t.number, code, t.capacity || 4, t.status || 'available']
     );
     res.json(mapTable(result.rows[0]));
   } catch (err: any) {
@@ -201,13 +306,14 @@ apiRouter.get('/categories', async (req: Request, res: Response) => {
 apiRouter.post('/categories', async (req: Request, res: Response) => {
   try {
     const { name, icon } = req.body;
+    const cafeId = await getCafeId();
     const id = `cat-${Date.now()}`;
     const countRes = await query('SELECT count(*) FROM categories');
     const displayOrder = parseInt(countRes.rows[0].count, 10) + 1;
     const result = await query(
       `INSERT INTO categories (id, cafe_id, name, icon, display_order)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [id, 'negis-kitchen', name, icon || 'Utensils', displayOrder]
+      [id, cafeId, name, icon || 'Utensils', displayOrder]
     );
     res.json(mapCategory(result.rows[0]));
   } catch (err: any) {
@@ -252,6 +358,7 @@ apiRouter.get('/menu', async (req: Request, res: Response) => {
 apiRouter.post('/menu', async (req: Request, res: Response) => {
   try {
     const item = req.body;
+    const cafeId = await getCafeId();
     const id = `item-${Date.now()}`;
     const result = await query(
       `INSERT INTO menu_items (id, cafe_id, category_id, name, description, price, veg_type, image_url, is_available, preparation_time_min, customization_groups)
@@ -259,7 +366,7 @@ apiRouter.post('/menu', async (req: Request, res: Response) => {
        RETURNING *`,
       [
         id,
-        'negis-kitchen',
+        cafeId,
         item.categoryId,
         item.name,
         item.description || '',
@@ -454,10 +561,19 @@ apiRouter.get('/orders', async (req: Request, res: Response) => {
 apiRouter.post('/orders', async (req: Request, res: Response) => {
   try {
     const orderData = req.body;
+    console.log('[POST /orders] body keys:', orderData ? Object.keys(orderData) : 'NO BODY');
+    console.log('[POST /orders] tableId:', orderData?.tableId, '| items count:', orderData?.items?.length);
+
+    // Body-parse guard: if body is empty the JSON middleware didn't run
+    if (!orderData || typeof orderData !== 'object' || !orderData.tableId) {
+      console.error('[POST /orders] Bad or missing body:', orderData);
+      return res.status(400).json({ error: 'Missing or invalid request body. Received: ' + JSON.stringify(orderData) });
+    }
     const forceNew = req.query.force === 'true';
 
     // Ensure table exists in tables DB table to avoid FK constraint failure
     if (orderData.tableId) {
+      const cafeId = await getCafeId();
       const tableCheck = await query('SELECT id FROM tables WHERE id = $1', [orderData.tableId]);
       if (tableCheck.rows.length === 0) {
         await query(
@@ -466,7 +582,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
            ON CONFLICT (id) DO NOTHING`,
           [
             orderData.tableId,
-            'negis-kitchen',
+            cafeId,
             orderData.tableNumber || `Table ${orderData.tableId.replace(/[^0-9]/g, '')}`,
             orderData.tableId,
             4,
@@ -554,21 +670,24 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     let orderId = orderData.id;
     if (!orderId) {
       try {
+        console.log('[POST /orders] getting next order id via function...');
         const seqRes = await query('SELECT get_next_order_id() as id');
         orderId = seqRes.rows[0].id;
-      } catch (e) {
+      } catch (e: any) {
+        console.warn('[POST /orders] get_next_order_id() not found, using count fallback:', e.message);
         const countRes = await query('SELECT count(*) FROM orders');
         const nextNum = parseInt(countRes.rows[0].count, 10) + 1026;
         orderId = `ORD-${nextNum}`;
       }
     }
-
+    console.log('[POST /orders] inserting order id:', orderId);
+    const cafeId = await getCafeId();
     await query(
       `INSERT INTO orders (id, cafe_id, table_id, table_number, status, customer_name, customer_phone, special_instructions, payment_method, payment_status, subtotal, tax, service_charge, total, order_rounds_count)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1)`,
       [
         orderId,
-        'negis-kitchen',
+        cafeId,
         orderData.tableId,
         orderData.tableNumber,
         orderData.status || 'received',
@@ -583,6 +702,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
         orderData.total || 0,
       ]
     );
+    console.log('[POST /orders] order row inserted, inserting round 1...');
 
     // Insert Round 1
     const prepTime = orderData.estimatedPrepTimeMin || 15;
@@ -593,10 +713,12 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
       [orderId, prepTime, orderData.status || 'received']
     );
     const roundId = roundRes.rows[0].id;
+    console.log('[POST /orders] round 1 inserted, id:', roundId, '| inserting', (orderData.items || []).length, 'items...');
 
     // Insert Round 1 items
     for (const it of orderData.items || []) {
       const validMenuItemId = await getValidMenuItemId(it.menuItemId);
+      console.log('[POST /orders] inserting item:', it.name, '| menuItemId:', validMenuItemId);
       await query(
         `INSERT INTO order_items (order_round_id, menu_item_id, name, price, veg_type, quantity, item_total, special_instructions, preparation_time_min, selected_customizations)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -614,18 +736,27 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
         ]
       );
     }
+    console.log('[POST /orders] all items inserted, updating table status...');
 
     // Mark table occupied
     await query(
       `UPDATE tables SET status = 'occupied', active_order_id = $1 WHERE id = $2`,
       [orderId, orderData.tableId]
     );
+    console.log('[POST /orders] table updated, fetching full order...');
 
     const created = await fetchFullOrders('WHERE id = $1', [orderId]);
+    console.log('[POST /orders] success, responding with order:', created[0]?.id);
     res.json(created[0]);
   } catch (err: any) {
     console.error('[POST /orders Error]:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message,
+      detail: err.detail || undefined,
+      hint: err.hint || undefined,
+      code: err.code || undefined,
+      where: err.where || undefined,
+    });
   }
 });
 

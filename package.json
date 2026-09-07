@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "vercel-build": "vite build",
     "preview": "vite preview",
+    "server": "tsx server/standalone.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
