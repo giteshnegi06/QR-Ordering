@@ -1,6 +1,7 @@
 import { CafeInfo, Category, MenuItem, Order, OrderRound, OrderStatus, TableItem } from '../types';
 import { INITIAL_CAFE, INITIAL_CATEGORIES, INITIAL_MENU_ITEMS, INITIAL_SAMPLE_ORDERS, INITIAL_TABLES } from '../data/initialData';
 import { soundService } from './sound';
+import { isRealtimeEnabled, subscribeToResourceChanges, RealtimeResource } from './realtime';
 
 const STORAGE_KEYS = {
   CAFE: 'negis_kitchen_info',
@@ -64,16 +65,64 @@ class StorageService {
       // Initial cloud sync from Neon database
       this.syncFromServer();
 
-      // Real-time background sync across devices every 3 seconds
-      setInterval(() => this.pollOrdersAndTables(), 3000);
+      // Live updates pushed via Pusher when another device changes data.
+      subscribeToResourceChanges((resource) => this.handleResourceChanged(resource));
+
+      // Safety-net poll in case a push is missed (or Pusher isn't configured,
+      // in which case this is the only sync mechanism and runs frequently).
+      const pollIntervalMs = isRealtimeEnabled() ? 20000 : 3000;
+      setInterval(() => this.pollOrdersAndTables(), pollIntervalMs);
+    }
+  }
+
+  private handleResourceChanged(resource: RealtimeResource): void {
+    if (resource === 'orders' || resource === 'tables') {
+      this.pollOrdersAndTables();
+    } else if (resource === 'categories' || resource === 'menu') {
+      this.refreshMenuData();
+    } else if (resource === 'cafe') {
+      this.refreshCafe();
+    }
+  }
+
+  private async refreshMenuData(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const [categories, menuItems] = await Promise.all([
+        this.apiFetch<Category[]>('/categories'),
+        this.apiFetch<MenuItem[]>('/menu'),
+      ]);
+      if (categories) {
+        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+        this.notify('CATEGORIES_UPDATED', categories);
+      }
+      if (menuItems) {
+        localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(menuItems));
+        this.notify('MENU_UPDATED', menuItems);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private async refreshCafe(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const cafe = await this.apiFetch<CafeInfo>('/cafe');
+      if (cafe) {
+        localStorage.setItem(STORAGE_KEYS.CAFE, JSON.stringify(cafe));
+        this.notify('CAFE_UPDATED', cafe);
+      }
+    } catch {
+      // ignore
     }
   }
 
   private async apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T | null> {
     if (typeof window === 'undefined') return null;
     // VITE_API_URL lets you point the frontend at a different backend origin.
-    // In normal usage (Vite dev + Vercel) both frontend and API share the same
-    // origin, so the default relative /api path works without any configuration.
+    // In production (Vercel), both frontend and API share the same origin.
+    // In local dev, you can point to Vercel's API if local DB connection fails.
     const apiBase = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '/api';
     try {
       const res = await fetch(`${apiBase}${endpoint}`, {

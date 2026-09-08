@@ -1,57 +1,47 @@
 /**
- * Database layer — uses @neondatabase/serverless Pool over HTTP/fetch.
- *
- * Why not pg?  The native `pg` package requires binary addons that Vercel's
- * bundler cannot include, causing FUNCTION_INVOCATION_FAILED at cold-start.
- * @neondatabase/serverless Pool talks to Neon over HTTPS with zero native
- * deps, so it works identically in Vercel serverless functions and Vite dev.
+ * Database layer — uses @neondatabase/serverless Pool with HTTP transport.
+ * Works identically in both local dev and Vercel production.
  */
 
 import { Pool, neonConfig } from '@neondatabase/serverless';
+import { fetch, Agent, setGlobalDispatcher } from 'undici';
 import dotenv from 'dotenv';
+import dns from 'dns';
 
-// Only load .env in non-Vercel environments (Vercel injects env vars directly)
+// Load .env in development
 if (process.env.VERCEL !== '1') {
   dotenv.config();
 }
 
-// Route Pool queries through fetch (HTTP) instead of WebSocket.
-// Required for Vercel serverless — WebSockets are not available there.
-// Also eliminates the need for the ws package.
-neonConfig.poolQueryViaFetch = true;
+// Some Windows/local networks advertise IPv6 routes to Neon's endpoints that
+// are actually unreachable, so Node's happy-eyeballs connection attempt
+// stalls on the IPv6 address for the full connect timeout before ever
+// trying IPv4 (which works fine). Prefer IPv4 to skip that stall.
+dns.setDefaultResultOrder('ipv4first');
+setGlobalDispatcher(new Agent({ connect: { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 300 } }));
 
-const CONNECTION_STRING =
-  process.env.DATABASE_URL ||
-  'postgresql://neondb_owner:npg_9rBYzDSUdx8f@ep-gentle-dawn-axbdtdrz-pooler.c-4.us-east-2.aws.neon.tech/QR-Order?sslmode=require';
+// Use HTTP/fetch transport everywhere (works in Node.js via undici)
+neonConfig.poolQueryViaFetch = true;
+neonConfig.fetchFunction = fetch as any;
+
+console.log('[DB] Using HTTP transport with undici fetch polyfill');
+
+const CONNECTION_STRING = process.env.DATABASE_URL;
 
 let _pool: Pool | null = null;
 
 function getPool(): Pool {
   if (!_pool) {
     if (!CONNECTION_STRING) {
-      throw new Error('DATABASE_URL is not set. Please configure it in Vercel Environment Variables or .env file.');
+      throw new Error('DATABASE_URL not set');
     }
-    
-    console.log('[DB] Initializing connection pool...');
-    console.log('[DB] Connection string preview:', CONNECTION_STRING.substring(0, 35) + '...');
-    
+    console.log('[DB] Creating connection pool...');
     _pool = new Pool({ connectionString: CONNECTION_STRING });
-    
-    // Test the connection immediately
-    _pool.query('SELECT 1 as test')
-      .then(() => console.log('[DB] ✅ Connection test successful'))
-      .catch((err) => {
-        console.error('[DB] ❌ Connection test failed:', err.message);
-        _pool = null; // Reset pool so next request can retry
-      });
+    console.log('[DB] Pool created successfully');
   }
   return _pool;
 }
 
-/**
- * Drop-in replacement for the old `pg` query helper.
- * Returns `{ rows: T[] }` so all existing call-sites stay unchanged.
- */
 export async function query<T = any>(
   text: string,
   params: any[] = []

@@ -5,6 +5,7 @@ import { CustomerView } from './components/customer/CustomerView';
 import { KitchenView } from './components/kitchen/KitchenView';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminLogin } from './components/admin/AdminLogin';
+import { soundService } from './services/sound';
 import {
   ChefHat,
   Store,
@@ -63,6 +64,23 @@ export const App: React.FC = () => {
     });
 
     return unsubscribe;
+  }, []);
+
+  // Browsers block audio until a real user gesture happens on the page. This
+  // must live at the app root (not inside KitchenView) because the very
+  // first click a kitchen user makes is the nav click that switches INTO the
+  // Kitchen KDS view — by the time KitchenView mounts and adds its own
+  // listener, that click has already fired and is gone, leaving audio
+  // locked until a second, unrelated click happens later. Listening here
+  // from the first paint means that very first nav click is what unlocks it.
+  useEffect(() => {
+    const unlock = () => soundService.unlock();
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+    window.addEventListener('keydown', unlock, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock, { capture: true });
+      window.removeEventListener('keydown', unlock, { capture: true });
+    };
   }, []);
 
   // Navigate between staff views and update URL

@@ -2,14 +2,22 @@ import express, { Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { query } from './db';
 import { swaggerDocument } from './swagger';
+import { notifyResourceChanged } from './realtime';
 
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
 
-// Use 'negis-kitchen' as the cafe ID for all operations.
-// This ensures FK constraints work since you want this ID in the database.
-let _cafeId: string | null = 'negis-kitchen';
+// Cache the single cafe row's real id so inserts satisfy the cafe_id FK
+// constraint even if the row was seeded/renamed with a different id than
+// any hardcoded value would assume.
+let _cafeId: string | null = null;
 async function getCafeId(): Promise<string> {
+  if (_cafeId) return _cafeId;
+  const result = await query('SELECT id FROM cafes LIMIT 1');
+  if (result.rows.length === 0) {
+    throw new Error('No cafe row found in database — seed the cafes table first');
+  }
+  _cafeId = result.rows[0].id;
   return _cafeId!;
 }
 
@@ -161,6 +169,7 @@ apiRouter.put('/cafe', async (req: Request, res: Response) => {
         c.id || await getCafeId(),
       ]
     );
+    notifyResourceChanged('cafe');
     res.json(mapCafe(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -200,6 +209,7 @@ apiRouter.post('/tables', async (req: Request, res: Response) => {
     );
     
     console.log('[POST /tables] Success, created table id:', id);
+    notifyResourceChanged('tables');
     res.json(mapTable(result.rows[0]));
   } catch (err: any) {
     console.error('[POST /tables] Error:', err);
@@ -247,6 +257,7 @@ apiRouter.patch('/tables/:id', async (req: Request, res: Response) => {
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Table not found' });
+    notifyResourceChanged('tables');
     res.json(mapTable(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -256,6 +267,7 @@ apiRouter.patch('/tables/:id', async (req: Request, res: Response) => {
 apiRouter.delete('/tables/:id', async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM tables WHERE id = $1', [req.params.id]);
+    notifyResourceChanged('tables');
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -294,6 +306,7 @@ apiRouter.post('/categories', async (req: Request, res: Response) => {
     );
     
     console.log('[POST /categories] Success, created category id:', id);
+    notifyResourceChanged('categories');
     res.json(mapCategory(result.rows[0]));
   } catch (err: any) {
     console.error('[POST /categories] Error:', err);
@@ -315,6 +328,7 @@ apiRouter.put('/categories/:id', async (req: Request, res: Response) => {
       [name, icon, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Category not found' });
+    notifyResourceChanged('categories');
     res.json(mapCategory(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -324,6 +338,7 @@ apiRouter.put('/categories/:id', async (req: Request, res: Response) => {
 apiRouter.delete('/categories/:id', async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM categories WHERE id = $1', [req.params.id]);
+    notifyResourceChanged('categories');
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -374,6 +389,7 @@ apiRouter.post('/menu', async (req: Request, res: Response) => {
     );
     
     console.log('[POST /menu] Success, created menu item id:', id);
+    notifyResourceChanged('menu');
     res.json(mapMenuItem(result.rows[0]));
   } catch (err: any) {
     console.error('[POST /menu] Error:', err);
@@ -417,6 +433,7 @@ apiRouter.put('/menu/:id', async (req: Request, res: Response) => {
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found' });
+    notifyResourceChanged('menu');
     res.json(mapMenuItem(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -431,6 +448,7 @@ apiRouter.patch('/menu/:id/availability', async (req: Request, res: Response) =>
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found' });
+    notifyResourceChanged('menu');
     res.json({ isAvailable: result.rows[0].is_available });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -440,6 +458,7 @@ apiRouter.patch('/menu/:id/availability', async (req: Request, res: Response) =>
 apiRouter.delete('/menu/:id', async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM menu_items WHERE id = $1', [req.params.id]);
+    notifyResourceChanged('menu');
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -664,6 +683,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
         );
 
         const updatedOrders = await fetchFullOrders('WHERE id = $1', [existing.id]);
+        notifyResourceChanged('orders');
         return res.json(updatedOrders[0]);
       }
     }
@@ -749,6 +769,8 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
 
     const created = await fetchFullOrders('WHERE id = $1', [orderId]);
     console.log('[POST /orders] success, responding with order:', created[0]?.id);
+    notifyResourceChanged('orders');
+    notifyResourceChanged('tables');
     res.json(created[0]);
   } catch (err: any) {
     console.error('[POST /orders Error]:', err);
@@ -810,6 +832,8 @@ apiRouter.patch('/orders/:id/status', async (req: Request, res: Response) => {
     }
 
     const updated = await fetchFullOrders('WHERE id = $1', [id]);
+    notifyResourceChanged('orders');
+    notifyResourceChanged('tables');
     res.json(updated[0] || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -854,6 +878,8 @@ apiRouter.patch('/orders/:id/rounds/:roundNumber/status', async (req: Request, r
     await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [aggregate, id]);
 
     const updated = await fetchFullOrders('WHERE id = $1', [id]);
+    notifyResourceChanged('orders');
+    if (aggregate === 'served' || aggregate === 'cancelled') notifyResourceChanged('tables');
     res.json(updated[0] || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -893,6 +919,7 @@ apiRouter.patch('/orders/:id/prep-time', async (req: Request, res: Response) => 
     }
 
     const updated = await fetchFullOrders('WHERE id = $1', [id]);
+    notifyResourceChanged('orders');
     res.json(updated[0] || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

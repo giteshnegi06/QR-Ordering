@@ -227,6 +227,9 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
 
   const totalNewOrders = orders.filter((o) => o.status === 'received').length;
 
+  const availableTablesCount = tables.filter((t) => t.status === 'available').length;
+  const occupiedTablesCount = tables.filter((t) => t.status === 'occupied').length;
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -328,13 +331,9 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
         <div className="space-y-4">
           <div className="flex items-center justify-between text-xs text-stone-500 px-1">
             <span>
-              Showing <strong>{filteredTableCards.length}</strong> Tables • Active & newly ordered
-              tables appear first
+              Showing <strong>{filteredTableCards.length}</strong> Tables • Available: <strong>{availableTablesCount}</strong> • Occupied: <strong>{occupiedTablesCount}</strong>
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-              <span>30-min auto-combine active for all table orders</span>
-            </span>
+            
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">

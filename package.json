@@ -27,10 +27,13 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pg": "^8.23.0",
+    "pusher": "^5.3.4",
+    "pusher-js": "^8.6.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "swagger-ui-express": "^5.0.1",
+    "undici": "^8.10.2",
     "vite": "^6.2.3"
   },
   "devDependencies": {
@@ -40,11 +43,14 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@types/swagger-ui-express": "^4.1.8",
+    "@types/ws": "^8.18.1",
+    "@vercel/node": "^3.0.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "ws": "^8.21.3"
   }
 }

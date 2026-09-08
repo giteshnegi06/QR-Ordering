@@ -50,19 +50,9 @@ export const KitchenView: React.FC<KitchenViewProps> = () => {
     return unsubscribe;
   }, []);
 
-  // Browsers block audio until a real user gesture happens on this page, so
-  // a chime fired later by a background "new order arrived" event (nobody
-  // actively clicking at that instant) would otherwise stay silent the first
-  // time. Prime the audio context on the very first click/tap/keypress here.
-  useEffect(() => {
-    const unlock = () => soundService.unlock();
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
-    };
-  }, []);
+  // Audio unlocking is handled at the app root (App.tsx) — it must run from
+  // the very first paint since the nav click that switches INTO this view is
+  // itself the first user gesture, and it fires before this component mounts.
 
   const handleToggleSound = () => {
     const next = !soundEnabled;
