@@ -92,20 +92,6 @@ export const AdminQRCodes: React.FC<AdminQRCodesProps> = ({
         </div>
       </div>
 
-      {/* Concept Callout */}
-      <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
-          <Sparkles className="w-5 h-5" />
-        </div>
-        <div className="text-xs">
-          <span className="font-bold text-amber-950">Dynamic Table Identification: </span>
-          <span className="text-amber-900">
-            Each QR code embeds <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[11px]">/menu/{cafe.id}/[tableId]</code>.
-            When scanned, the kitchen automatically receives that specific table number with zero manual selection needed by the guest.
-          </span>
-        </div>
-      </div>
-
       {/* Grid of Tables */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
         {tables.map((table) => {

@@ -117,8 +117,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col md:flex-row">
-      {/* Sidebar for Desktop */}
-      <aside className="hidden md:flex flex-col w-64 bg-stone-900 text-stone-200 border-r border-stone-800 p-4 shrink-0">
+      {/* Sidebar for Desktop — sticky to the viewport so it stays in place
+          while the main content area scrolls; scrolls its own nav list
+          independently if the window is too short to fit everything.
+          Offset by 55px (the height of App.tsx's own sticky top nav bar
+          above this layout) — sticking to top-0 would tuck the sidebar's
+          top edge behind that bar once scrolled, cutting off the brand
+          header. */}
+      <aside className="hidden md:flex flex-col w-64 h-[calc(100vh-55px)] sticky top-[55px] bg-stone-900 text-stone-200 border-r border-stone-800 p-4 shrink-0 overflow-y-auto">
         {/* Brand Header */}
         <div className="flex items-center gap-3 px-3 py-3 mb-4 border-b border-stone-800">
           <div className="w-10 h-10 rounded-2xl bg-amber-500 text-stone-950 flex items-center justify-center font-black">
