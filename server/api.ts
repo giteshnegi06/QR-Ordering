@@ -1,8 +1,8 @@
 import express, { Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
-import { query } from './db';
-import { swaggerDocument } from './swagger';
-import { notifyResourceChanged } from './realtime';
+import { query } from './db.js';
+import { swaggerDocument } from './swagger.js';
+import { notifyResourceChanged } from './realtime.js';
 
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
