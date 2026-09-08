@@ -16,9 +16,13 @@ if (process.env.VERCEL !== '1') {
 // Some Windows/local networks advertise IPv6 routes to Neon's endpoints that
 // are actually unreachable, so Node's happy-eyeballs connection attempt
 // stalls on the IPv6 address for the full connect timeout before ever
-// trying IPv4 (which works fine). Prefer IPv4 to skip that stall.
-dns.setDefaultResultOrder('ipv4first');
-setGlobalDispatcher(new Agent({ connect: { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 300 } }));
+// trying IPv4 (which works fine). Prefer IPv4 to skip that stall. This is a
+// local-dev-only workaround — Vercel's own network doesn't have this problem,
+// and touching the global dispatcher there is an unnecessary crash risk.
+if (process.env.VERCEL !== '1') {
+  dns.setDefaultResultOrder('ipv4first');
+  setGlobalDispatcher(new Agent({ connect: { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 300 } }));
+}
 
 // Use HTTP/fetch transport everywhere (works in Node.js via undici)
 neonConfig.poolQueryViaFetch = true;
