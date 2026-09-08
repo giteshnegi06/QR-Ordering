@@ -170,16 +170,22 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
             <span>Item Subtotal</span>
             <span>{cafe.currency}{order.subtotal.toFixed(2)}</span>
           </div>
-          {/* Tax commented out in the bill for now
-          <div className="flex justify-between text-stone-600">
-            <span>GST ({cafe.taxPercent}%)</span>
-            <span>{cafe.currency}{order.tax.toFixed(2)}</span>
-          </div>
-          */}
+          {order.tax > 0 && (
+            <div className="flex justify-between text-stone-600">
+              <span>GST ({cafe.taxPercent}%)</span>
+              <span>{cafe.currency}{order.tax.toFixed(2)}</span>
+            </div>
+          )}
+          {order.serviceCharge > 0 && (
+            <div className="flex justify-between text-stone-600">
+              <span>Service Charge ({cafe.serviceChargePercent}%)</span>
+              <span>{cafe.currency}{order.serviceCharge.toFixed(2)}</span>
+            </div>
+          )}
           <div className="pt-2 border-t border-stone-200 flex justify-between text-sm font-black text-stone-900">
             <span>Grand Total</span>
             <span className="text-amber-800 text-base">
-              {cafe.currency}{order.subtotal.toFixed(2)}
+              {cafe.currency}{order.total.toFixed(2)}
             </span>
           </div>
         </div>

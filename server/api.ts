@@ -869,11 +869,18 @@ apiRouter.patch('/orders/:id/rounds/:roundNumber/status', async (req: Request, r
       [id]
     );
     const statuses = allRounds.rows.map((r) => r.status);
+    // Mirror the client's computeAggregateOrderStatus: a round that's already
+    // served/cancelled is done and must not count against "are the remaining
+    // rounds all ready" — otherwise a table with 2 served rounds + 1 ready
+    // round falls through every check below and wrongly lands back on
+    // 'preparing', freezing the order status at the wrong badge forever.
+    const activeStatuses = statuses.filter((s) => s !== 'served' && s !== 'cancelled');
     let aggregate = 'preparing';
     if (statuses.every((s) => s === 'served')) aggregate = 'served';
     else if (statuses.every((s) => s === 'cancelled')) aggregate = 'cancelled';
-    else if (statuses.every((s) => s === 'ready')) aggregate = 'ready';
-    else if (statuses.every((s) => s === 'received')) aggregate = 'received';
+    else if (activeStatuses.length === 0) aggregate = 'served';
+    else if (activeStatuses.every((s) => s === 'ready')) aggregate = 'ready';
+    else if (activeStatuses.every((s) => s === 'received')) aggregate = 'received';
 
     await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [aggregate, id]);
 

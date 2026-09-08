@@ -113,7 +113,42 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
         </div>
       )}
 
-      {isCooking && (
+      {/* Once overdue, drop the animated countdown/progress bar entirely —
+          it's no longer telling the kitchen anything useful, and constantly
+          re-rendering it every second (spinning timer, pulsing flame, moving
+          bar) is what caused cards to visibly jitter/shuffle. A delayed round
+          just needs two flat actions: push the estimate out, or mark it done. */}
+      {isCooking && isOverdue && (
+        <div className="mt-2.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-rose-800">
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>Delayed by {Math.abs(Math.floor((now - targetReadyTime) / 60000))}m</span>
+            </div>
+            <button
+              type="button"
+              onClick={onAddFiveMinutes}
+              className="px-2 py-0.5 bg-white hover:bg-rose-100 border border-rose-300 rounded text-[10px] font-bold text-rose-900 flex items-center gap-0.5 shadow-2xs transition-colors cursor-pointer"
+              title="Add 5 minutes to this round's estimated time"
+            >
+              <Plus className="w-3 h-3" /> 5m
+            </button>
+          </div>
+
+          {!isOnlyRound && (
+            <button
+              type="button"
+              onClick={onMarkReady}
+              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Mark This Round Ready</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {isCooking && !isOverdue && (
         <div className="mt-2.5 p-2.5 bg-blue-50/70 border border-blue-200/80 rounded-xl space-y-2">
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center gap-1.5 font-bold text-blue-900">
@@ -122,19 +157,13 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
             </div>
             <div className="flex items-center gap-1 font-mono font-black text-xs text-blue-950">
               <Timer className="w-3.5 h-3.5 text-blue-600 animate-spin" />
-              <span>
-                {isOverdue
-                  ? `Overdue (+${Math.abs(Math.floor((now - targetReadyTime) / 60000))}m)`
-                  : `${formatCountdownStatic(remainingSeconds)} left`}
-              </span>
+              <span>{formatCountdownStatic(remainingSeconds)} left</span>
             </div>
           </div>
 
           <div className="h-2 w-full bg-blue-200/60 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-1000 ${
-                isOverdue ? 'bg-rose-500' : 'bg-gradient-to-r from-blue-500 to-amber-500'
-              }`}
+              className="h-full rounded-full transition-all duration-1000 bg-gradient-to-r from-blue-500 to-amber-500"
               style={{ width: `${progressPercent}%` }}
             />
           </div>

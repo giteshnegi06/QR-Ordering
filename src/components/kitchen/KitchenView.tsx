@@ -248,7 +248,7 @@ export const KitchenView: React.FC<KitchenViewProps> = () => {
       {/* Live Ping Notification Banner */}
       {lastOrderPing && (
         <div className="bg-amber-500 text-stone-950 px-4 py-2 text-center text-xs font-black tracking-wide shadow-lg flex items-center justify-center gap-2 animate-bounce">
-          <Sparkles className="w-4 h-4" />
+          {/* <Sparkles className="w-4 h-4" /> */}
           <span>{lastOrderPing}</span>
         </div>
       )}

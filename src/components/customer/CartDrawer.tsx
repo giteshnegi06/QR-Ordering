@@ -47,10 +47,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   if (!isOpen) return null;
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.itemTotal, 0);
-  // Tax & Serving charges removed from billing
-  const tax = 0;
-  const serviceCharge = 0;
-  const grandTotal = subtotal;
+  const tax = Number(((subtotal * cafe.taxPercent) / 100).toFixed(2));
+  const serviceCharge = Number(((subtotal * cafe.serviceChargePercent) / 100).toFixed(2));
+  const grandTotal = Number((subtotal + tax + serviceCharge).toFixed(2));
 
   const handleOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -361,12 +360,18 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <span>Item Subtotal</span>
                   <span>{currency}{subtotal.toFixed(2)}</span>
                 </div>
-                {/* Tax commented out in the bill for now
-                <div className="flex justify-between text-xs text-stone-600">
-                  <span>GST ({cafe.taxPercent}%)</span>
-                  <span>{currency}{tax.toFixed(2)}</span>
-                </div>
-                */}
+                {cafe.taxPercent > 0 && (
+                  <div className="flex justify-between text-xs text-stone-600">
+                    <span>GST ({cafe.taxPercent}%)</span>
+                    <span>{currency}{tax.toFixed(2)}</span>
+                  </div>
+                )}
+                {cafe.serviceChargePercent > 0 && (
+                  <div className="flex justify-between text-xs text-stone-600">
+                    <span>Service Charge ({cafe.serviceChargePercent}%)</span>
+                    <span>{currency}{serviceCharge.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="pt-2 border-t border-stone-200 flex justify-between text-sm font-black text-stone-900">
                   <span>Grand Total</span>
                   <span className="text-amber-800 text-base">{currency}{grandTotal.toFixed(2)}</span>

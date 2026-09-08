@@ -278,11 +278,9 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
     if (cartItems.length === 0) return;
 
     const subtotal = cartTotalAmount;
-    // Tax commented out in the bill for now
-    // const tax = Number(((subtotal * cafe.taxPercent) / 100).toFixed(2));
-    const tax = 0;
+    const tax = Number(((subtotal * cafe.taxPercent) / 100).toFixed(2));
     const serviceCharge = Number(((subtotal * cafe.serviceChargePercent) / 100).toFixed(2));
-    const total = Number((subtotal + serviceCharge).toFixed(2));
+    const total = Number((subtotal + tax + serviceCharge).toFixed(2));
 
     const newOrder = storageService.createOrder({
       cafeId: cafe.id,

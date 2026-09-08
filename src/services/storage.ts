@@ -59,8 +59,11 @@ class StorageService {
         }
       });
 
-      // Auto-promote any round whose prep countdown has hit zero straight to "ready"
-      setInterval(() => this.autoAdvanceReadyOrders(), 2000);
+      // A round's timer hitting zero does NOT mean the dish is actually
+      // done — it just means the kitchen is now running late. Rounds sit in
+      // that overdue "Delayed" state (see KitchenOrderCard) until staff
+      // explicitly adds more time or marks it ready themselves; nothing
+      // here silently auto-completes it on their behalf.
 
       // Initial cloud sync from Neon database
       this.syncFromServer();
@@ -212,6 +215,20 @@ class StorageService {
           }
           this.notify('ORDERS_UPDATED', merged);
         }
+
+        // A "local-only" order usually just means its own createOrder() POST
+        // hasn't resolved yet — give that a moment. But if the POST genuinely
+        // failed (network blip, server briefly down) it would otherwise sit
+        // here forever as a phantom duplicate, since nothing else retries it.
+        // Re-POST it, reusing the same id, so it can never end up as two
+        // separate records.
+        const RETRY_GRACE_MS = 15000;
+        const now = Date.now();
+        for (const order of localOnly) {
+          if (now - order.createdAt > RETRY_GRACE_MS) {
+            this.retrySyncOrder(order);
+          }
+        }
       }
       // If server returns empty array, do NOT overwrite local orders —
       // the DB may not be seeded yet or could be temporarily unavailable.
@@ -228,54 +245,28 @@ class StorageService {
     }
   }
 
-
-  private autoAdvanceReadyOrders(): void {
-    const orders = this.getOrders();
-    const now = Date.now();
-    let changed = false;
-
-    for (const order of orders) {
-      if (order.status === 'served' || order.status === 'cancelled') continue;
-
-      if (order.rounds && order.rounds.length > 0) {
-        for (const round of order.rounds) {
-          if (round.status !== 'preparing') continue;
-          const target = (round.preparingStartedAt || round.placedAt) + round.estimatedPrepTimeMin * 60 * 1000;
-          if (now >= target) {
-            round.status = 'ready';
-            round.readyAt = now;
-            changed = true;
-          }
-        }
-
-        // Only recompute aggregate if we actually have round data.
-        // An empty rounds array means data hasn't synced yet — do NOT
-        // change the order status (avoids the auto-serve bug).
-        const aggregateStatus = this.computeAggregateOrderStatus(order.rounds);
-        if (aggregateStatus !== order.status) {
-          order.status = aggregateStatus;
-          if (aggregateStatus === 'ready' && !order.readyAt) {
-            order.readyAt = now;
-          }
-          order.updatedAt = now;
-          changed = true;
-        }
-      } else if (order.status === 'preparing') {
-        const prepStart = order.preparingStartedAt || order.createdAt;
-        const prepMin = order.estimatedPrepTimeMin || 15;
-        if (now >= prepStart + prepMin * 60 * 1000) {
-          order.status = 'ready';
-          order.readyAt = now;
-          order.updatedAt = now;
-          changed = true;
-        }
+  // Re-POSTs an order that never made it to the server, reusing its
+  // existing id so the retry can never create a second, differently-ID'd
+  // record — the server accepts a client-supplied id on creation.
+  private async retrySyncOrder(order: Order): Promise<void> {
+    try {
+      const serverOrder = await this.apiFetch<Order>('/orders', {
+        method: 'POST',
+        body: JSON.stringify(order),
+      });
+      if (serverOrder) {
+        // The server may have merged this into an already-existing active
+        // order for the table (the same 30-min-combine rule createOrder
+        // uses) instead of creating a fresh row under our id — drop the
+        // phantom entry either way rather than risk a duplicate-id row.
+        const withoutPhantom = this.getOrders().filter((o) => o.id !== order.id);
+        const next = withoutPhantom.some((o) => o.id === serverOrder.id)
+          ? withoutPhantom.map((o) => (o.id === serverOrder.id ? serverOrder : o))
+          : [...withoutPhantom, serverOrder];
+        this.saveOrders(next);
       }
-      // If order.rounds is empty and status is 'received'/'ready' — leave it alone.
-    }
-
-    if (changed) {
-      this.saveOrders(orders);
-      soundService.playStatusUpdateBlip();
+    } catch {
+      // will retry again on the next poll
     }
   }
 
@@ -615,10 +606,10 @@ class StorageService {
       const subtotal = Number(
         existingActiveOrder.items.reduce((sum, it) => sum + it.itemTotal, 0).toFixed(2)
       );
-      // Tax & Service Charge removed from billing
-      const tax = 0;
-      const serviceCharge = 0;
-      const total = subtotal;
+      const billingCafe = this.getCafe();
+      const tax = Number(((subtotal * billingCafe.taxPercent) / 100).toFixed(2));
+      const serviceCharge = Number(((subtotal * billingCafe.serviceChargePercent) / 100).toFixed(2));
+      const total = Number((subtotal + tax + serviceCharge).toFixed(2));
 
       existingActiveOrder.subtotal = subtotal;
       existingActiveOrder.tax = tax;
@@ -700,10 +691,14 @@ class StorageService {
     // Broadcast new order specifically
     this.notify('NEW_ORDER', newOrder);
 
-    // Persist new order to Neon and update client ID when server responds
+    // Persist new order to Neon using the SAME id we already assigned
+    // locally (the server accepts a client-supplied id) so the two never
+    // diverge — if this request fails, the retry in pollOrdersAndTables()
+    // reuses this same id too, instead of ever creating a mismatched
+    // duplicate that lingers as an orphaned "local-only" order forever.
     this.apiFetch<Order>(`/orders${options?.forceNewOrder ? '?force=true' : ''}`, {
       method: 'POST',
-      body: JSON.stringify(orderData),
+      body: JSON.stringify({ ...orderData, id }),
     })
       .then((serverOrder) => {
         if (serverOrder) {
@@ -770,10 +765,10 @@ class StorageService {
 
     // Recalculate bill
     const subtotal = Number(primaryOrder.items.reduce((sum, item) => sum + item.itemTotal, 0).toFixed(2));
-    // Tax & Service Charge removed from billing
-    const tax = 0;
-    const serviceCharge = 0;
-    const total = subtotal;
+    const mergeCafe = this.getCafe();
+    const tax = Number(((subtotal * mergeCafe.taxPercent) / 100).toFixed(2));
+    const serviceCharge = Number(((subtotal * mergeCafe.serviceChargePercent) / 100).toFixed(2));
+    const total = Number((subtotal + tax + serviceCharge).toFixed(2));
 
     primaryOrder.subtotal = subtotal;
     primaryOrder.tax = tax;

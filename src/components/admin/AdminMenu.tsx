@@ -77,28 +77,30 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
   const handleSaveItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    const safePrice = Number.isNaN(price) ? 0 : price;
+    const safePrepTime = Number.isNaN(preparationTimeMin) ? 15 : preparationTimeMin;
 
     if (editingItem) {
       onUpdateMenuItem(editingItem.id, {
         name: name.trim(),
         description: description.trim(),
-        price: Number(price),
+        price: safePrice,
         categoryId,
         vegType,
         image: image.trim(),
         isAvailable,
-        preparationTimeMin: Number(preparationTimeMin),
+        preparationTimeMin: safePrepTime,
       });
     } else {
       onAddMenuItem({
         name: name.trim(),
         description: description.trim(),
-        price: Number(price),
+        price: safePrice,
         categoryId,
         vegType,
         image: image.trim() || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
         isAvailable,
-        preparationTimeMin: Number(preparationTimeMin),
+        preparationTimeMin: safePrepTime,
       });
     }
 
@@ -317,8 +319,8 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
                 type="number"
                 required
                 min={0}
-                value={price}
-                onChange={(e) => setPrice(Number(e.target.value))}
+                value={Number.isNaN(price) ? '' : price}
+                onChange={(e) => setPrice(e.target.valueAsNumber)}
                 className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -329,8 +331,8 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
               <input
                 type="number"
                 min={1}
-                value={preparationTimeMin}
-                onChange={(e) => setPreparationTimeMin(Number(e.target.value))}
+                value={Number.isNaN(preparationTimeMin) ? '' : preparationTimeMin}
+                onChange={(e) => setPreparationTimeMin(e.target.valueAsNumber)}
                 className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
               />
             </div>

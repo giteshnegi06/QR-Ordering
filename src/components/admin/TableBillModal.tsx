@@ -32,10 +32,9 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
   // Consolidate all items across all orders for this table
   const consolidatedItems = orders.flatMap((o) => o.items);
   const totalSubtotal = orders.reduce((sum, o) => sum + o.subtotal, 0);
-  // Tax & Serving charges removed from the bill
-  const totalTax = 0;
-  const totalServiceCharge = 0;
-  const grandTotal = totalSubtotal;
+  const totalTax = Number(orders.reduce((sum, o) => sum + o.tax, 0).toFixed(2));
+  const totalServiceCharge = Number(orders.reduce((sum, o) => sum + o.serviceCharge, 0).toFixed(2));
+  const grandTotal = Number((totalSubtotal + totalTax + totalServiceCharge).toFixed(2));
 
   const orderIdsList = orders.map((o) => `#${o.id}`).join(', ');
   const primaryOrder = orders[0];
@@ -112,11 +111,9 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
             </h2>
             <p className="text-xs text-stone-500 font-sans">{cafe.address}</p>
             <p className="text-xs text-stone-500 font-sans">Phone: {cafe.phone}</p>
-            {/* Tax Reg commented out for now
             {cafe.taxPercent > 0 && (
               <p className="text-[10px] text-stone-400 font-sans">GST / Tax Reg: GSTIN-CAFE-01928</p>
             )}
-            */}
             <div className="pt-2">
               <span className="inline-block px-3 py-0.5 bg-stone-100 text-stone-800 text-xs font-bold font-sans rounded-md uppercase tracking-wider">
                 TABLE INVOICE
@@ -211,7 +208,6 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
               </span>
             </div>
 
-            {/* Tax commented out for now
             {totalTax > 0 && (
               <div className="flex justify-between text-stone-600">
                 <span>GST / Tax ({cafe.taxPercent}%)</span>
@@ -221,7 +217,15 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
                 </span>
               </div>
             )}
-            */}
+            {totalServiceCharge > 0 && (
+              <div className="flex justify-between text-stone-600">
+                <span>Service Charge ({cafe.serviceChargePercent}%)</span>
+                <span>
+                  {cafe.currency}
+                  {totalServiceCharge.toFixed(2)}
+                </span>
+              </div>
+            )}
 
             <div className="pt-2 border-t-2 border-stone-950 flex justify-between text-base font-black font-sans text-stone-950">
               <span>GRAND TOTAL</span>

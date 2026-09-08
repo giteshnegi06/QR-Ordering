@@ -59,16 +59,17 @@ export const AdminTables: React.FC<AdminTablesProps> = ({
   const handleSaveTable = (e: React.FormEvent) => {
     e.preventDefault();
     if (!tableNumber.trim()) return;
+    const safeCapacity = Number.isNaN(capacity) ? 1 : capacity;
 
     if (editingTable) {
       onUpdateTable(editingTable.id, {
         number: tableNumber.trim(),
-        capacity: Number(capacity),
+        capacity: safeCapacity,
       });
     } else {
       onAddTable({
         number: tableNumber.trim(),
-        capacity: Number(capacity),
+        capacity: safeCapacity,
         status: 'available',
       });
     }
@@ -215,8 +216,8 @@ export const AdminTables: React.FC<AdminTablesProps> = ({
               type="number"
               min={1}
               max={50}
-              value={capacity}
-              onChange={(e) => setCapacity(Number(e.target.value))}
+              value={Number.isNaN(capacity) ? '' : capacity}
+              onChange={(e) => setCapacity(e.target.valueAsNumber)}
               className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
             />
           </div>

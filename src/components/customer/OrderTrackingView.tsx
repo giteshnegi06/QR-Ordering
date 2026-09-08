@@ -152,6 +152,7 @@ const RoundTrackingBlock: React.FC<RoundTrackingBlockProps> = ({ round, currency
   const prepDurationMs = prepTimeMinutes * 60 * 1000;
   const prepStartTime = round.preparingStartedAt || round.placedAt;
   const targetReadyTime = prepStartTime + prepDurationMs;
+  const isOverdue = isCooking && now > targetReadyTime;
 
   let progressPercent = 0;
   let remainingSeconds = 0;
@@ -208,20 +209,22 @@ const RoundTrackingBlock: React.FC<RoundTrackingBlockProps> = ({ round, currency
             <div className="text-sm font-black text-stone-900 flex items-center gap-1.5">
               <span>
                 {isPending && 'Kitchen Received This Round'}
-                {isCooking && 'Chef is Preparing This Round'}
+                {isCooking && !isOverdue && 'Chef is Preparing This Round'}
+                {isOverdue && 'Running a Little Behind'}
                 {isDone && (round.status === 'served' ? 'Delivered ✓' : 'Ready to Serve!')}
               </span>
-              {isCooking && <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-ping" />}
+              {isCooking && !isOverdue && <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-ping" />}
             </div>
 
             <div className="text-xs text-stone-500 mt-0.5 flex flex-wrap items-center gap-x-2">
-              {isCooking && (
+              {isCooking && !isOverdue && (
                 <>
                   <span>Target: ~{new Date(targetReadyTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   <span>•</span>
                   <span>{prepTimeMinutes} min total prep</span>
                 </>
               )}
+              {isOverdue && <span>Still cooking — the kitchen has your order</span>}
               {isPending && <span>Estimated prep: ~{prepTimeMinutes} minutes</span>}
               {isDone && <span>Prepared fresh in ~{prepTimeMinutes} minutes</span>}
             </div>
@@ -229,7 +232,14 @@ const RoundTrackingBlock: React.FC<RoundTrackingBlockProps> = ({ round, currency
         </div>
 
         <div className="text-right shrink-0 bg-white border border-stone-200 px-3.5 py-2 rounded-xl shadow-2xs">
-          {isCooking ? (
+          {isOverdue ? (
+            <>
+              <div className="font-mono text-sm font-black text-rose-700 tracking-tight leading-none">
+                Almost there
+              </div>
+              <div className="text-[9px] font-extrabold uppercase tracking-wider text-stone-400 mt-1">Thanks for waiting</div>
+            </>
+          ) : isCooking ? (
             <>
               <div className="font-mono text-xl font-black text-amber-900 tracking-tight leading-none flex items-center justify-end gap-1">
                 <Timer className="w-4 h-4 text-amber-600 animate-spin" />
@@ -261,7 +271,7 @@ const RoundTrackingBlock: React.FC<RoundTrackingBlockProps> = ({ round, currency
             }`}
             style={{ width: `${progressPercent}%` }}
           >
-            {isCooking && <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />}
+            {isCooking && !isOverdue && <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />}
           </div>
         </div>
       </div>
