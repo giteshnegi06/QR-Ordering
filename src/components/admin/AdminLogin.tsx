@@ -55,9 +55,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
           {/* Quick Demo Access banner */}
           <div className="p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-2xl">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-bold text-amber-900 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                Demo Credentials Available
+              <span className="text-xs font-bold text-amber-900 flex items-center gap-1">                Demo Credentials Available
               </span>
               <span className="text-[10px] uppercase font-bold text-amber-700 bg-amber-200/70 px-1.5 py-0.5 rounded">
                 Instant Access

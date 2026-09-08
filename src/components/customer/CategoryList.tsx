@@ -1,7 +1,7 @@
 import React from 'react';
 import { Category } from '../../types';
 import {
-  Sparkles,
+  Soup,
   UtensilsCrossed,
   Pizza,
   Sandwich,
@@ -21,8 +21,8 @@ interface CategoryListProps {
 
 const getCategoryIcon = (iconName: string) => {
   switch (iconName) {
-    case 'Sparkles':
-      return Sparkles;
+    case 'Soup':
+      return Soup;
     case 'UtensilsCrossed':
       return UtensilsCrossed;
     case 'Pizza':
