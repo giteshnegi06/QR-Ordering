@@ -70,22 +70,41 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
     };
   }, [tables, tableId]);
 
-  // Active unserved orders for THIS table only — an order belongs to whichever
-  // table it was placed for, so a different table's QR must never surface it
-  // (a global "customer order id" history would leak orders across tables).
-  const activeOrdersForTable = useMemo(() => {
+  // Ids of the orders THIS device actually placed. Recorded by the storage
+  // service as each order is created, and re-read on every order update so a
+  // freshly placed order shows up immediately.
+  const [myOrderIds, setMyOrderIds] = useState<string[]>(() =>
+    storageService.getCustomerOrderIds()
+  );
+
+  useEffect(() => {
+    const unsubscribe = storageService.subscribe((type) => {
+      if (type === 'ORDERS_UPDATED' || type === 'NEW_ORDER') {
+        setMyOrderIds(storageService.getCustomerOrderIds());
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // A diner may only ever see their own orders. Two conditions, both required:
+  // the order was placed from this device, AND it belongs to the table whose QR
+  // is open. Table alone would show whoever sat here earlier today their
+  // predecessor's food and bill; the id list alone would follow a diner to
+  // another table's QR.
+  const ordersForTable = useMemo(() => {
+    const mine = new Set(myOrderIds);
     return orders.filter(
       (o) =>
-        (o.tableId === currentTable.id || o.tableNumber === currentTable.number) &&
-        o.status !== 'served' &&
-        o.status !== 'cancelled'
+        mine.has(o.id) && (o.tableId === currentTable.id || o.tableNumber === currentTable.number)
     );
-  }, [orders, currentTable]);
+  }, [orders, currentTable, myOrderIds]);
 
-  // All orders for this table (including served ones)
-  const allOrdersForTable = useMemo(() => {
-    return orders.filter((o) => o.tableId === currentTable.id || o.tableNumber === currentTable.number);
-  }, [orders, currentTable]);
+  const activeOrdersForTable = useMemo(() => {
+    return ordersForTable.filter((o) => o.status !== 'served' && o.status !== 'cancelled');
+  }, [ordersForTable]);
+
+  // This diner's orders for this table, served ones included.
+  const allOrdersForTable = ordersForTable;
 
   // Reset tracking view whenever the active table changes (e.g. switching the
   // simulated table QR), so one table's tracking screen never bleeds into another's.

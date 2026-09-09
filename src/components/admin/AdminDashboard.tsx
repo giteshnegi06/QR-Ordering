@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { CafeInfo, MenuItem, Order, TableItem } from '../../types';
+import { MonthRevenueModal } from './MonthRevenueModal';
 import {
   DollarSign,
   ShoppingBag,
@@ -9,6 +10,8 @@ import {
   ChefHat,
   AlertCircle,
   TrendingUp,
+  TrendingDown,
+  CalendarRange,
   ArrowRight,
 } from 'lucide-react';
 
@@ -29,6 +32,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateSection,
   onOpenOrder,
 }) => {
+  const [isMonthBreakdownOpen, setIsMonthBreakdownOpen] = useState(false);
+
   // Metric Calculations
   const metrics = useMemo(() => {
     const today = new Date();
@@ -39,6 +44,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const todaySales = todayOrders
       .filter((o) => o.status !== 'cancelled')
       .reduce((sum, o) => sum + (o.subtotal + (o.serviceCharge || 0)), 0);
+
+    // Revenue is what the cafe keeps: the food total plus service charge.
+    // Tax is collected on behalf of the government, so it is not counted here
+    // — same basis as Today's Sales above, so the two figures agree.
+    const earnedBy = (o: Order) => o.subtotal + (o.serviceCharge || 0);
+    const isBillable = (o: Order) => o.status !== 'cancelled';
+
+    // Calendar month, not a rolling 30 days — "this month" on a dashboard means
+    // the month you are standing in. Month -1 rolls the year back on its own.
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+    const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).getTime();
+
+    const monthOrders = orders.filter((o) => o.createdAt >= monthStart && isBillable(o));
+    const monthRevenue = monthOrders.reduce((sum, o) => sum + earnedBy(o), 0);
+
+    const prevMonthRevenue = orders
+      .filter((o) => o.createdAt >= prevMonthStart && o.createdAt < monthStart && isBillable(o))
+      .reduce((sum, o) => sum + earnedBy(o), 0);
+
+    // Only meaningful with something to compare against — a first month of
+    // trading would otherwise read as an infinite increase.
+    const monthChangePercent =
+      prevMonthRevenue > 0 ? ((monthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100 : null;
 
     const activeOrders = orders.filter(
       (o) => o.status === 'received' || o.status === 'preparing' || o.status === 'ready'
@@ -53,6 +81,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return {
       todayOrdersCount: todayOrders.length,
       todaySales,
+      monthRevenue,
+      monthOrdersCount: monthOrders.length,
+      monthLabel: today.toLocaleString(undefined, { month: 'long', year: 'numeric' }),
+      monthKey: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`,
+      monthChangePercent,
       activeOrdersCount: activeOrders.length,
       completedOrdersCount: completedOrders.length,
       totalTables: tables.length,
@@ -88,7 +121,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
           >
             <ChefHat className="w-4 h-4" />
-            <span>Open Kitchen KDS</span>
+            <span>Open Kitchen</span>
           </button>
           <button
             onClick={() => onNavigateSection('qrcodes')}
@@ -100,7 +133,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Today's Sales */}
         <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs">
           <div className="flex items-center justify-between text-stone-400 mb-2">
@@ -117,6 +150,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>{metrics.todayOrdersCount} orders placed</span>
           </div>
         </div>
+
+        {/* This Month's Revenue — opens the day-by-day breakdown */}
+        <button
+          type="button"
+          onClick={() => setIsMonthBreakdownOpen(true)}
+          title="See what each day earned this month"
+          className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer"
+        >
+          <div className="flex items-center justify-between text-stone-400 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              Month Revenue
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <CalendarRange className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black text-stone-900">
+            {cafe.currency}
+            {metrics.monthRevenue.toFixed(2)}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] mt-1">
+            <span className="text-stone-500">
+              {metrics.monthLabel} • {metrics.monthOrdersCount} orders
+            </span>
+            {metrics.monthChangePercent !== null && (
+              <span
+                className={`inline-flex items-center gap-0.5 font-bold ${
+                  metrics.monthChangePercent >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                }`}
+              >
+                {metrics.monthChangePercent >= 0 ? (
+                  <TrendingUp className="w-3 h-3" />
+                ) : (
+                  <TrendingDown className="w-3 h-3" />
+                )}
+                {Math.abs(metrics.monthChangePercent).toFixed(0)}% vs last month
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] font-bold text-indigo-600 mt-1.5">View daily earnings →</div>
+        </button>
 
         {/* Active Orders */}
         <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs">
@@ -305,6 +379,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ))}
         </div>
       </div>
+
+      <MonthRevenueModal
+        isOpen={isMonthBreakdownOpen}
+        onClose={() => setIsMonthBreakdownOpen(false)}
+        cafe={cafe}
+        month={metrics.monthKey}
+        monthLabel={metrics.monthLabel}
+      />
     </div>
   );
 };

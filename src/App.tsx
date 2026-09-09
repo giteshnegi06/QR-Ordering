@@ -147,7 +147,7 @@ export const App: React.FC = () => {
               }`}
             >
               <ChefHat className="w-3.5 h-3.5" />
-              <span>Kitchen KDS</span>
+              <span>Kitchen</span>
               {orders.filter((o) => o.status === 'received' || o.status === 'preparing').length > 0 && (
                 <span className="w-2 h-2 rounded-full bg-rose-500 inline-block ml-0.5" />
               )}

@@ -14,7 +14,41 @@ const STORAGE_KEYS = {
   CUSTOMER_LAST_ORDER_ID: 'negis_kitchen_customer_last_order',
   CUSTOMER_ORDER_IDS: 'negis_kitchen_customer_order_ids',
   ADMIN_AUTH: 'negis_kitchen_admin_auth',
+  SYNCED_ORDER_IDS: 'negis_kitchen_synced_order_ids',
 };
+
+// Kitchen backlog rule: while more than this many orders are still waiting to
+// be cooked, the kitchen is behind, and every order past that point inherits
+// the queue's delay on top of its own cooking time.
+const KITCHEN_BUSY_THRESHOLD = 5;
+const KITCHEN_BUSY_EXTRA_MIN = 8;
+
+// Order numbers run ORD-1001 through ORD-9009 and then start over at 1001.
+// Mirrored in server/api.ts, which validates and can reassign the id.
+const ORDER_ID_MIN = 1001;
+const ORDER_ID_MAX = 9009;
+const ORDER_ID_RANGE = ORDER_ID_MAX - ORDER_ID_MIN + 1;
+
+const nextOrderNumber = (n: number): number => (n >= ORDER_ID_MAX ? ORDER_ID_MIN : n + 1);
+
+// The order number a given id carries, or null if it isn't one of ours.
+const orderIdNumber = (id: string): number | null => {
+  const match = /^ORD-(\d+)$/.exec(id || '');
+  if (!match) return null;
+  const n = parseInt(match[1], 10);
+  return n >= ORDER_ID_MIN && n <= ORDER_ID_MAX ? n : null;
+};
+
+// How many acknowledged order ids to remember. Only needs to outlive the window
+// in which a deleted order could still be sitting in some device's localStorage.
+const SYNCED_ORDER_ID_MEMORY = 300;
+
+// How long an order may sit unacknowledged by the server before we assume its
+// POST was lost and re-send it, how long to wait between those re-sends, and
+// how many we allow before giving up and leaving it as a local-only order.
+const ORDER_SYNC_GRACE_MS = 15000;
+const ORDER_SYNC_RETRY_INTERVAL_MS = 30000;
+const ORDER_SYNC_MAX_ATTEMPTS = 5;
 
 type EventType =
   | 'ORDERS_UPDATED'
@@ -26,9 +60,36 @@ type EventType =
 
 type Listener = (type: EventType, payload?: unknown) => void;
 
+export interface DailyRevenueDay {
+  date: string;
+  ordersCount: number;
+  subtotal: number;
+  serviceCharge: number;
+  tax: number;
+  revenue: number;
+}
+
+export interface DailyRevenueReport {
+  month: string;
+  timeZone: string;
+  days: DailyRevenueDay[];
+  totalRevenue: number;
+  totalOrders: number;
+}
+
 class StorageService {
   private listeners: Set<Listener> = new Set();
   private broadcastChannel: BroadcastChannel | null = null;
+
+  // Orders with a POST currently in flight. A create can take several seconds
+  // (cold serverless start, slow DB), and the poll below runs every few
+  // seconds — without this the same order gets POSTed again and again while
+  // the first attempt is still running, and every one of those duplicates is
+  // recorded as an extra round on the order.
+  private ordersBeingSynced: Set<string> = new Set();
+  // Per-order retry bookkeeping, so a genuinely failing order backs off
+  // instead of hammering the server on every single poll tick.
+  private orderSyncAttempts: Map<string, { attempts: number; lastAttemptAt: number }> = new Map();
 
   constructor() {
     this.initStorage();
@@ -166,7 +227,11 @@ class StorageService {
         localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(menuItems));
         this.notifyLocal('MENU_UPDATED', menuItems);
       }
-      if (orders) {
+      // Same guard as the poll: an empty list means "nothing seeded yet" or a
+      // half-up database, not "every order was deleted" — never let it wipe
+      // orders that are still only stored locally.
+      if (orders && orders.length > 0) {
+        this.rememberSyncedOrderIds(orders.map((o) => o.id));
         localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
         this.notifyLocal('ORDERS_UPDATED', orders);
       }
@@ -191,7 +256,16 @@ class StorageService {
         // Merge server orders with local orders: preserve any locally-created
         // orders that haven't been persisted to the server yet.
         const serverIds = new Set(serverOrders.map((o) => o.id));
+        this.rememberSyncedOrderIds(serverOrders.map((o) => o.id));
+        const syncedBefore = this.getSyncedOrderIds();
+
+        // An order the server has never acknowledged is one whose POST may have
+        // been lost — worth re-sending. An order the server acknowledged once
+        // and no longer returns was deleted on purpose, so re-sending it would
+        // resurrect it on every poll forever; drop our copy instead.
         const localOnly = currentOrders.filter((o) => !serverIds.has(o.id));
+        const deletedRemotely = localOnly.filter((o) => syncedBefore.has(o.id));
+        const neverSynced = localOnly.filter((o) => !syncedBefore.has(o.id));
 
         // Server orders with rounds=[] should inherit status from local copy
         // to avoid the auto-serve race condition.
@@ -204,7 +278,7 @@ class StorageService {
           return serverOrder;
         });
 
-        const merged = [...mergedOrders, ...localOnly];
+        const merged = [...mergedOrders, ...neverSynced];
         const isDifferent = JSON.stringify(merged) !== JSON.stringify(currentOrders);
 
         if (isDifferent) {
@@ -222,12 +296,18 @@ class StorageService {
         // here forever as a phantom duplicate, since nothing else retries it.
         // Re-POST it, reusing the same id, so it can never end up as two
         // separate records.
-        const RETRY_GRACE_MS = 15000;
         const now = Date.now();
-        for (const order of localOnly) {
-          if (now - order.createdAt > RETRY_GRACE_MS) {
+        for (const order of neverSynced) {
+          if (now - order.createdAt > ORDER_SYNC_GRACE_MS) {
             this.retrySyncOrder(order);
           }
+        }
+
+        if (deletedRemotely.length > 0) {
+          console.info(
+            '[storage] dropping locally-held orders deleted on the server:',
+            deletedRemotely.map((o) => o.id).join(', ')
+          );
         }
       }
       // If server returns empty array, do NOT overwrite local orders —
@@ -248,9 +328,56 @@ class StorageService {
   // Re-POSTs an order that never made it to the server, reusing its
   // existing id so the retry can never create a second, differently-ID'd
   // record — the server accepts a client-supplied id on creation.
-  private async retrySyncOrder(order: Order): Promise<void> {
+  private getSyncedOrderIds(): Set<string> {
     try {
-      const serverOrder = await this.apiFetch<Order>('/orders', {
+      const raw = localStorage.getItem(STORAGE_KEYS.SYNCED_ORDER_IDS);
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  }
+
+  // Remembers that the server has these orders, so a later poll can tell a
+  // never-delivered order (re-send it) from a deleted one (let it go).
+  private rememberSyncedOrderIds(ids: string[]): void {
+    try {
+      const known = this.getSyncedOrderIds();
+      const before = known.size;
+      for (const id of ids) known.add(id);
+      if (known.size === before) return;
+      const trimmed = [...known].slice(-SYNCED_ORDER_ID_MEMORY);
+      localStorage.setItem(STORAGE_KEYS.SYNCED_ORDER_IDS, JSON.stringify(trimmed));
+    } catch {
+      // storage full or unavailable — retries just stay as they were
+    }
+  }
+
+  private async retrySyncOrder(order: Order): Promise<void> {
+    // Never run a second POST for an order while one is still in flight. The
+    // poll fires every few seconds (and again on every realtime 'orders'
+    // event, which our own writes trigger), so without this a create that
+    // simply takes a while to answer gets re-sent over and over — and the
+    // server records each of those re-sends as another round on the order.
+    if (this.ordersBeingSynced.has(order.id)) return;
+
+    const record = this.orderSyncAttempts.get(order.id) || { attempts: 0, lastAttemptAt: 0 };
+    if (record.attempts >= ORDER_SYNC_MAX_ATTEMPTS) return;
+    if (Date.now() - record.lastAttemptAt < ORDER_SYNC_RETRY_INTERVAL_MS) return;
+
+    this.orderSyncAttempts.set(order.id, {
+      attempts: record.attempts + 1,
+      lastAttemptAt: Date.now(),
+    });
+    this.ordersBeingSynced.add(order.id);
+
+    try {
+      // force=true so the server skips its 30-min "fold this into the table's
+      // active order" rule. A retry is asking for one specific order to exist
+      // under one specific id — never for a round to be tacked onto whatever
+      // else that table happens to have open. Paired with the server's
+      // id-already-exists check, re-sending is then a no-op rather than a
+      // phantom round.
+      const serverOrder = await this.apiFetch<Order>('/orders?force=true', {
         method: 'POST',
         body: JSON.stringify(order),
       });
@@ -264,9 +391,12 @@ class StorageService {
           ? withoutPhantom.map((o) => (o.id === serverOrder.id ? serverOrder : o))
           : [...withoutPhantom, serverOrder];
         this.saveOrders(next);
+        this.orderSyncAttempts.delete(order.id);
       }
     } catch {
-      // will retry again on the next poll
+      // will retry again on a later poll, once the backoff above has elapsed
+    } finally {
+      this.ordersBeingSynced.delete(order.id);
     }
   }
 
@@ -289,7 +419,7 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(INITIAL_SAMPLE_ORDERS));
     }
     if (!localStorage.getItem(STORAGE_KEYS.ORDER_SEQ)) {
-      localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, '1025');
+      localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, String(ORDER_ID_MIN));
     }
   }
 
@@ -522,15 +652,56 @@ class StorageService {
   }
 
   public saveOrders(orders: Order[]): void {
-    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
-    this.notify('ORDERS_UPDATED', orders);
+    // Collapse repeats of the same id. Local and server copies of one order
+    // meet here from several directions (create, retry, poll), and a stray
+    // duplicate would show the kitchen the same ticket twice.
+    const byId = new Map<string, Order>();
+    for (const order of orders) {
+      byId.set(order.id, order);
+    }
+    const deduped = [...byId.values()];
+    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(deduped));
+    this.notify('ORDERS_UPDATED', deduped);
   }
 
   public getNextOrderNumber(): string {
-    const seq = parseInt(localStorage.getItem(STORAGE_KEYS.ORDER_SEQ) || '1025', 10);
-    const nextSeq = seq + 1;
-    localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, nextSeq.toString());
-    return `ORD-${seq}`;
+    // Every order number we already know about, plus where the newest one sits
+    // in the cycle. Both matter: the number has to be free (it's the order's
+    // primary key), and after a wrap the highest number is no longer the latest.
+    const taken = new Set<number>();
+    let latestNumber: number | null = null;
+    let latestCreatedAt = -1;
+
+    for (const order of this.getOrders()) {
+      const number = orderIdNumber(order.id);
+      if (number === null) continue;
+      taken.add(number);
+      if (order.createdAt > latestCreatedAt) {
+        latestCreatedAt = order.createdAt;
+        latestNumber = number;
+      }
+    }
+
+    // This counter lives in one browser's localStorage, so a phone scanning the
+    // QR for the first time — or a device whose site data was cleared — restarts
+    // it at the bottom of the range and proposes ids that stored orders already
+    // hold. Skipping taken numbers below covers that; carrying on from the most
+    // recent order keeps a fresh device from re-walking the whole cycle.
+    const stored = parseInt(localStorage.getItem(STORAGE_KEYS.ORDER_SEQ) || '', 10);
+    let candidate =
+      Number.isFinite(stored) && stored >= ORDER_ID_MIN && stored <= ORDER_ID_MAX
+        ? stored
+        : ORDER_ID_MIN;
+
+    if (taken.has(candidate) && latestNumber !== null) {
+      candidate = nextOrderNumber(latestNumber);
+    }
+    for (let step = 0; step < ORDER_ID_RANGE && taken.has(candidate); step++) {
+      candidate = nextOrderNumber(candidate);
+    }
+
+    localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, String(nextOrderNumber(candidate)));
+    return `ORD-${candidate}`;
   }
 
   public createOrder(
@@ -573,7 +744,9 @@ class StorageService {
 
       // Record this addition as its own round with its own prep timer, so it
       // never mixes with an earlier round's countdown or elapsed time.
-      const newRoundPrepTime = this.calculateRoundPrepTime(orderData.items);
+      const newRoundPrepTime = this.applyKitchenLoadSurcharge(
+        this.calculateRoundPrepTime(orderData.items)
+      );
       const newRound: OrderRound = {
         roundNumber: existingActiveOrder.rounds.length + 1,
         items: JSON.parse(JSON.stringify(orderData.items)),
@@ -643,9 +816,12 @@ class StorageService {
       this.notify('ORDERS_UPDATED', orders);
 
       // Persist merged order round to Neon
+      // Send the prep time we just worked out (kitchen-backlog surcharge and
+      // all) — otherwise the server stores its own flat default and the next
+      // poll overwrites this round's timer with it.
       this.apiFetch<Order>(`/orders${options?.forceNewOrder ? '?force=true' : ''}`, {
         method: 'POST',
-        body: JSON.stringify(orderData),
+        body: JSON.stringify({ ...orderData, estimatedPrepTimeMin: newRoundPrepTime }),
       }).catch(() => {});
 
       return existingActiveOrder;
@@ -654,7 +830,9 @@ class StorageService {
     const id = this.getNextOrderNumber();
 
     // Determine estimated prep time based on items or default
-    const calculatedPrepTime = this.calculateRoundPrepTime(orderData.items);
+    const calculatedPrepTime = this.applyKitchenLoadSurcharge(
+      this.calculateRoundPrepTime(orderData.items)
+    );
 
     const resolvedPrepTime = orderData.estimatedPrepTimeMin || calculatedPrepTime;
     const resolvedPreparingStartedAt = orderData.status === 'preparing' ? now : undefined;
@@ -696,9 +874,13 @@ class StorageService {
     // diverge — if this request fails, the retry in pollOrdersAndTables()
     // reuses this same id too, instead of ever creating a mismatched
     // duplicate that lingers as an orphaned "local-only" order forever.
+    // Held for the whole request so the poll's local-only retry can't fire a
+    // second POST for this order while this one is still on its way — a slow
+    // create would otherwise be re-sent and land as a duplicate round.
+    this.ordersBeingSynced.add(id);
     this.apiFetch<Order>(`/orders${options?.forceNewOrder ? '?force=true' : ''}`, {
       method: 'POST',
-      body: JSON.stringify({ ...orderData, id }),
+      body: JSON.stringify({ ...orderData, id, estimatedPrepTimeMin: resolvedPrepTime }),
     })
       .then((serverOrder) => {
         if (serverOrder) {
@@ -711,7 +893,8 @@ class StorageService {
           }
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => this.ordersBeingSynced.delete(id));
 
     return newOrder;
   }
@@ -812,6 +995,24 @@ class StorageService {
     if (!items || items.length === 0) return 15;
     const maxPrep = items.reduce((max, item) => Math.max(max, item.preparationTimeMin || 15), 0);
     return maxPrep + (items.length - 1);
+  }
+
+  // How many orders the kitchen is already working through — anything the
+  // kitchen still has to cook ('received' = not accepted yet, 'preparing' =
+  // on the pass). 'ready' is done cooking, so it no longer holds up a queue.
+  private getKitchenQueueLoad(): number {
+    return this.getOrders().filter((o) => o.status === 'received' || o.status === 'preparing')
+      .length;
+  }
+
+  // Once the kitchen is holding more than KITCHEN_BUSY_THRESHOLD orders, every
+  // further order (the 6th onwards) waits behind that backlog — so quote it
+  // KITCHEN_BUSY_EXTRA_MIN minutes on top of its own cooking time instead of
+  // promising a time only an empty kitchen could hit.
+  private applyKitchenLoadSurcharge(basePrepTimeMin: number): number {
+    return this.getKitchenQueueLoad() >= KITCHEN_BUSY_THRESHOLD
+      ? basePrepTimeMin + KITCHEN_BUSY_EXTRA_MIN
+      : basePrepTimeMin;
   }
 
   // Given each round's own status, works out the single status shown for the
@@ -1001,6 +1202,24 @@ class StorageService {
     return order;
   }
 
+  // Day-by-day takings for one calendar month (YYYY-MM). The server
+  // recomputes these from the orders themselves and stores them in the
+  // daily_revenue table, so the numbers here always match the order list.
+  // The browser's own zone decides where a day starts, matching how the rest
+  // of the dashboard reads "today".
+  public async getDailyRevenue(month: string): Promise<DailyRevenueReport | null> {
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch {
+        return 'UTC';
+      }
+    })();
+    return this.apiFetch<DailyRevenueReport>(
+      `/revenue/daily?month=${encodeURIComponent(month)}&tz=${encodeURIComponent(timeZone)}`
+    );
+  }
+
   public getLastCustomerOrderId(): string | null {
     return localStorage.getItem(STORAGE_KEYS.CUSTOMER_LAST_ORDER_ID);
   }
@@ -1048,7 +1267,7 @@ class StorageService {
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(INITIAL_CATEGORIES));
     localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(INITIAL_MENU_ITEMS));
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(INITIAL_SAMPLE_ORDERS));
-    localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, '1025');
+    localStorage.setItem(STORAGE_KEYS.ORDER_SEQ, String(ORDER_ID_MIN));
     localStorage.removeItem(STORAGE_KEYS.CUSTOMER_ORDER_IDS);
     localStorage.removeItem(STORAGE_KEYS.CUSTOMER_LAST_ORDER_ID);
     this.notify('CAFE_UPDATED');

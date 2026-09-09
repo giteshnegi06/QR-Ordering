@@ -242,7 +242,7 @@ const RoundTrackingBlock: React.FC<RoundTrackingBlockProps> = ({ round, currency
           ) : isCooking ? (
             <>
               <div className="font-mono text-xl font-black text-amber-900 tracking-tight leading-none flex items-center justify-end gap-1">
-                <Timer className="w-4 h-4 text-amber-600 animate-spin" />
+                <Timer className="w-4 h-4 text-amber-600" />
                 <span>{formatCountdownStatic(remainingSeconds)}</span>
               </div>
               <div className="text-[9px] font-extrabold uppercase tracking-wider text-stone-400 mt-1">Time Remaining</div>

@@ -466,6 +466,95 @@ apiRouter.delete('/menu/:id', async (req: Request, res: Response) => {
 });
 
 // --- ORDERS ---
+
+// Kitchen backlog rule: while more than KITCHEN_BUSY_THRESHOLD orders are still
+// waiting to be cooked, every further order (the 6th onwards) queues behind that
+// backlog, so it is quoted KITCHEN_BUSY_EXTRA_MIN minutes on top of its own
+// cooking time. Mirrors the same rule in src/services/storage.ts.
+const KITCHEN_BUSY_THRESHOLD = 5;
+const KITCHEN_BUSY_EXTRA_MIN = 8;
+
+// How recently an order must have been stored for a POST carrying its id to
+// count as a re-send of that same order rather than a client reusing an id that
+// is already taken. Comfortably wider than the client's retry window.
+const ORDER_RESEND_WINDOW_MS = 10 * 60 * 1000;
+
+// Order numbers run ORD-1001 through ORD-9009 and then start over at 1001.
+// Mirrored in src/services/storage.ts, which proposes the id.
+const ORDER_ID_MIN = 1001;
+const ORDER_ID_MAX = 9009;
+const ORDER_ID_RANGE = ORDER_ID_MAX - ORDER_ID_MIN + 1;
+
+const nextOrderNumber = (n: number): number => (n >= ORDER_ID_MAX ? ORDER_ID_MIN : n + 1);
+
+// A round's own cooking time: the slowest dish, plus a minute per extra dish.
+function computeRoundPrepTime(items: any[]): number {
+  if (!items || items.length === 0) return 15;
+  const maxPrep = items.reduce(
+    (max: number, item: any) => Math.max(max, Number(item?.preparationTimeMin) || 15),
+    0
+  );
+  return maxPrep + (items.length - 1);
+}
+
+// Orders the kitchen still has to cook — 'received' (not accepted yet) and
+// 'preparing' (on the pass). 'ready' is already cooked, so it holds nobody up.
+async function getKitchenQueueLoad(): Promise<number> {
+  const res = await query(
+    `SELECT count(*) FROM orders WHERE status IN ('received', 'preparing')`
+  );
+  return Number(res.rows[0].count) || 0;
+}
+
+// Prep time for a round about to be created: whatever the client already
+// worked out, else this round's cooking time plus the backlog surcharge when
+// the kitchen is over the threshold. Call BEFORE inserting the new order so it
+// does not count itself.
+async function resolveNewRoundPrepTime(orderData: any): Promise<number> {
+  if (orderData?.estimatedPrepTimeMin) return Number(orderData.estimatedPrepTimeMin);
+  const base = computeRoundPrepTime(orderData?.items);
+  const queueLoad = await getKitchenQueueLoad();
+  return queueLoad >= KITCHEN_BUSY_THRESHOLD ? base + KITCHEN_BUSY_EXTRA_MIN : base;
+}
+
+// The order number a given id carries, or null if it isn't one of ours.
+function orderIdNumber(id: string | undefined | null): number | null {
+  const match = /^ORD-(\d+)$/.exec(id || '');
+  if (!match) return null;
+  const n = parseInt(match[1], 10);
+  return n >= ORDER_ID_MIN && n <= ORDER_ID_MAX ? n : null;
+}
+
+// Hands out the next order id in the 1001-9009 cycle. Numbers still held by a
+// stored order are skipped rather than reused: the id is the primary key, so
+// after a wrap the ones that haven't been cleared out yet are not free to
+// hand out again.
+async function allocateOrderId(): Promise<string> {
+  const takenRes = await query(
+    `SELECT substring(id from 5)::int AS n FROM orders WHERE id ~ '^ORD-[0-9]+$'`
+  );
+  const taken = new Set<number>(takenRes.rows.map((r: any) => Number(r.n)));
+
+  // Continue from the most recently placed order rather than the highest
+  // number, which would sit at the top of the range forever once it wraps.
+  const lastRes = await query(
+    `SELECT id FROM orders WHERE id ~ '^ORD-[0-9]+$' ORDER BY created_at DESC LIMIT 1`
+  );
+  const lastNumber = orderIdNumber(lastRes.rows[0]?.id);
+
+  let candidate = lastNumber === null ? ORDER_ID_MIN : nextOrderNumber(lastNumber);
+  for (let step = 0; step < ORDER_ID_RANGE && taken.has(candidate); step++) {
+    candidate = nextOrderNumber(candidate);
+  }
+
+  if (taken.has(candidate)) {
+    throw new Error(
+      `All order numbers ${ORDER_ID_MIN}-${ORDER_ID_MAX} are in use — clear out old orders before placing more.`
+    );
+  }
+  return `ORD-${candidate}`;
+}
+
 async function fetchFullOrders(whereClause = '', params: any[] = []) {
   const ordersQuery = `
     SELECT * FROM orders
@@ -570,6 +659,119 @@ async function fetchFullOrders(whereClause = '', params: any[] = []) {
   });
 }
 
+// --- REVENUE ---
+
+// Day-by-day takings for one calendar month.
+//
+// The figures are recomputed from `orders` (the source of truth) on every
+// request and then upserted into daily_revenue, so the stored rollup can never
+// drift from the orders it summarises — and a caller that would rather read the
+// table directly, for an export or a report, always finds it current.
+//
+// `tz` decides where a day starts. An 11pm order in Asia/Kolkata belongs to
+// that day, not to the next one as UTC would have it, so the caller passes its
+// own zone and the same boundary is used for both the maths and the stored row.
+apiRouter.get('/revenue/daily', async (req: Request, res: Response) => {
+  try {
+    const month = String(req.query.month || '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return res.status(400).json({ error: 'month must be formatted YYYY-MM' });
+    }
+    const timeZone = String(req.query.tz || 'UTC');
+    const cafeId = await getCafeId();
+
+    // Cancelled orders never earned anything, so they are left out of every
+    // figure here — matching what the dashboard's other money tiles show.
+    let daily;
+    try {
+      daily = await query(
+        `SELECT
+           -- Returned as text on purpose. A date column comes back from the
+           -- driver as a JS Date at *local* midnight, so formatting it through
+           -- toISOString() shifts the label a day west of the actual day.
+           to_char((created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS business_date,
+           count(*)::int                      AS orders_count,
+           sum(subtotal)                      AS subtotal,
+           sum(COALESCE(service_charge, 0))   AS service_charge,
+           sum(COALESCE(tax, 0))              AS tax,
+           sum(subtotal + COALESCE(service_charge, 0)) AS revenue
+         FROM orders
+         WHERE cafe_id = $1
+           AND status <> 'cancelled'
+           AND (created_at AT TIME ZONE $2) >= ($3 || '-01')::date
+           AND (created_at AT TIME ZONE $2) <  (($3 || '-01')::date + interval '1 month')
+         GROUP BY 1
+         ORDER BY 1`,
+        [cafeId, timeZone, month]
+      );
+    } catch (e: any) {
+      // An unknown zone name is the caller's mistake, not a server fault.
+      if (/time zone/i.test(e.message || '')) {
+        return res.status(400).json({ error: `Unknown time zone: ${timeZone}` });
+      }
+      throw e;
+    }
+
+    for (const row of daily.rows) {
+      await query(
+        `INSERT INTO daily_revenue
+           (cafe_id, business_date, orders_count, subtotal, service_charge, tax, revenue, time_zone, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+         ON CONFLICT (cafe_id, business_date) DO UPDATE SET
+           orders_count   = EXCLUDED.orders_count,
+           subtotal       = EXCLUDED.subtotal,
+           service_charge = EXCLUDED.service_charge,
+           tax            = EXCLUDED.tax,
+           revenue        = EXCLUDED.revenue,
+           time_zone      = EXCLUDED.time_zone,
+           updated_at     = now()`,
+        [
+          cafeId,
+          row.business_date,
+          row.orders_count,
+          row.subtotal,
+          row.service_charge,
+          row.tax,
+          row.revenue,
+          timeZone,
+        ]
+      );
+    }
+
+    // A day the cafe recorded takings for and has since had every order
+    // deleted would otherwise keep its stale row forever.
+    const keptDates = daily.rows.map((r: any) => r.business_date);
+    await query(
+      `DELETE FROM daily_revenue
+       WHERE cafe_id = $1
+         AND business_date >= ($2 || '-01')::date
+         AND business_date <  (($2 || '-01')::date + interval '1 month')
+         AND NOT (business_date = ANY($3::date[]))`,
+      [cafeId, month, keptDates]
+    );
+
+    const days = daily.rows.map((r: any) => ({
+      date: String(r.business_date),
+      ordersCount: Number(r.orders_count),
+      subtotal: Number(r.subtotal),
+      serviceCharge: Number(r.service_charge),
+      tax: Number(r.tax),
+      revenue: Number(r.revenue),
+    }));
+
+    res.json({
+      month,
+      timeZone,
+      days,
+      totalRevenue: days.reduce((sum: number, d: any) => sum + d.revenue, 0),
+      totalOrders: days.reduce((sum: number, d: any) => sum + d.ordersCount, 0),
+    });
+  } catch (err: any) {
+    console.error('[GET /revenue/daily Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 apiRouter.get('/orders', async (req: Request, res: Response) => {
   try {
     const orders = await fetchFullOrders();
@@ -591,6 +793,53 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing or invalid request body. Received: ' + JSON.stringify(orderData) });
     }
     const forceNew = req.query.force === 'true';
+
+    // Idempotency guard. The client POSTs with the id it already assigned
+    // locally, and re-POSTs that same order if its first attempt looked like it
+    // failed (a slow response, a dropped connection). Without this check the
+    // re-send falls through to the 30-min merge rule below and gets recorded as
+    // an extra ROUND on the very order it was trying to create — one phantom
+    // round per retry. If we already have this id, the write is already done.
+    if (orderData.id) {
+      const existingById = await query(
+        'SELECT id, table_id, total, created_at FROM orders WHERE id = $1',
+        [orderData.id]
+      );
+      if (existingById.rows.length > 0) {
+        const row = existingById.rows[0];
+        // Only a genuine re-send short-circuits. The client's order numbers come
+        // from a counter in its own localStorage, so a new device — or one whose
+        // site data was cleared — restarts at the bottom of the range and asks
+        // for ids that
+        // older orders already hold. Treating that as a re-send would hand the
+        // customer back somebody's finished order instead of taking their new
+        // one, so require the marks only a real retry carries: same table, same
+        // money, and placed within the retry window rather than hours ago.
+        const isResend =
+          row.table_id === orderData.tableId &&
+          Number(row.total) === (Number(orderData.total) || 0) &&
+          Date.now() - new Date(row.created_at).getTime() < ORDER_RESEND_WINDOW_MS;
+
+        if (isResend) {
+          console.log('[POST /orders] duplicate re-send of', orderData.id, '— returning stored order');
+          const alreadyStored = await fetchFullOrders('WHERE id = $1', [orderData.id]);
+          return res.json(alreadyStored[0]);
+        }
+
+        // Otherwise the client reused an id that is already taken. Drop it and
+        // let the DB hand out a fresh one below.
+        console.warn('[POST /orders] id', orderData.id, 'already taken — assigning a new id');
+        delete orderData.id;
+      }
+    }
+
+    // Anything that survived the check above still has to be a number from the
+    // ORD-1001..ORD-9009 cycle; a client proposing something outside it gets
+    // one issued here instead, so the numbering stays inside the range.
+    if (orderData.id && orderIdNumber(orderData.id) === null) {
+      console.warn('[POST /orders] id', orderData.id, 'is outside the order-number range — assigning a new id');
+      delete orderData.id;
+    }
 
     // Ensure table exists in tables DB table to avoid FK constraint failure
     if (orderData.tableId) {
@@ -624,7 +873,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     if (!forceNew) {
       const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
       const activeRes = await query(
-        `SELECT id, order_rounds_count, subtotal, total FROM orders 
+        `SELECT id FROM orders
          WHERE table_id = $1 AND status NOT IN ('served', 'cancelled') AND created_at >= $2
          ORDER BY created_at DESC LIMIT 1`,
         [orderData.tableId, thirtyMinsAgo]
@@ -632,10 +881,32 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
 
       if (activeRes.rows.length > 0) {
         const existing = activeRes.rows[0];
-        const newRoundNumber = Number(existing.order_rounds_count) + 1;
 
         // Calculate prep time for new round
-        const prepTime = orderData.estimatedPrepTimeMin || 15;
+        const prepTime = await resolveNewRoundPrepTime(orderData);
+
+        // Claim the next round number in the same statement that increments it.
+        // Two people ordering for this table at the same moment serialise on
+        // this row's lock and each get a distinct number, so they can no
+        // longer both read the same count and then collide on uq_order_round
+        // (which would fail one of the two orders outright). GREATEST also
+        // heals a count that has fallen behind the rounds actually stored,
+        // which would otherwise hand out a number that is already taken.
+        const bumped = await query(
+          `UPDATE orders SET
+            order_rounds_count = GREATEST(
+              order_rounds_count,
+              (SELECT COALESCE(MAX(round_number), 0) FROM order_rounds WHERE order_id = orders.id)
+            ) + 1,
+            is_merged = true,
+            subtotal = subtotal + $2,
+            total = total + $3,
+            updated_at = now()
+           WHERE id = $1
+           RETURNING order_rounds_count`,
+          [existing.id, Number(orderData.subtotal) || 0, Number(orderData.total) || 0]
+        );
+        const newRoundNumber = Number(bumped.rows[0].order_rounds_count);
 
         // Create new round in DB
         const roundRes = await query(
@@ -667,20 +938,9 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
           );
         }
 
-        // Update existing order subtotal and total
-        const newSubtotal = Number(existing.subtotal) + Number(orderData.subtotal);
-        const newTotal = Number(existing.total) + Number(orderData.total);
-
-        await query(
-          `UPDATE orders SET 
-            order_rounds_count = $1,
-            is_merged = true,
-            subtotal = $2,
-            total = $3,
-            updated_at = now()
-           WHERE id = $4`,
-          [newRoundNumber, newSubtotal, newTotal, existing.id]
-        );
+        // Totals and the round count were already applied by the UPDATE that
+        // claimed newRoundNumber — writing them again from the values read
+        // earlier would clobber a concurrent round's contribution.
 
         const updatedOrders = await fetchFullOrders('WHERE id = $1', [existing.id]);
         notifyResourceChanged('orders');
@@ -689,19 +949,11 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     }
 
     // 2. Create fresh new order
-    let orderId = orderData.id;
-    if (!orderId) {
-      try {
-        console.log('[POST /orders] getting next order id via function...');
-        const seqRes = await query('SELECT get_next_order_id() as id');
-        orderId = seqRes.rows[0].id;
-      } catch (e: any) {
-        console.warn('[POST /orders] get_next_order_id() not found, using count fallback:', e.message);
-        const countRes = await query('SELECT count(*) FROM orders');
-        const nextNum = parseInt(countRes.rows[0].count, 10) + 1026;
-        orderId = `ORD-${nextNum}`;
-      }
-    }
+    // Worked out before the INSERT below so this order is not counted as part
+    // of the backlog it is being measured against.
+    const prepTime = await resolveNewRoundPrepTime(orderData);
+
+    const orderId = orderData.id || (await allocateOrderId());
     console.log('[POST /orders] inserting order id:', orderId);
     const cafeId = await getCafeId();
     await query(
@@ -726,13 +978,16 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     );
     console.log('[POST /orders] order row inserted, inserting round 1...');
 
-    // Insert Round 1
-    const prepTime = orderData.estimatedPrepTimeMin || 15;
+    // Insert Round 1. An order that arrives already 'preparing' (placed on
+    // behalf of a table by staff) must get its preparing_started_at here too —
+    // that column is what both countdowns measure from, and leaving it null
+    // silently reset the timer's origin to placed_at on the next sync.
+    const round1Status = orderData.status || 'received';
     const roundRes = await query(
-      `INSERT INTO order_rounds (order_id, round_number, placed_at, estimated_prep_time_min, status)
-       VALUES ($1, 1, now(), $2, $3)
+      `INSERT INTO order_rounds (order_id, round_number, placed_at, estimated_prep_time_min, status, preparing_started_at)
+       VALUES ($1, 1, now(), $2, $3, CASE WHEN $3 = 'preparing' THEN now() ELSE NULL END)
        RETURNING id`,
-      [orderId, prepTime, orderData.status || 'received']
+      [orderId, prepTime, round1Status]
     );
     const roundId = roundRes.rows[0].id;
     console.log('[POST /orders] round 1 inserted, id:', roundId, '| inserting', (orderData.items || []).length, 'items...');

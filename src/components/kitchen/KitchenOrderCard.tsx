@@ -44,7 +44,11 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
   const isServed = round.status === 'served';
   const isReady = isReadyToServe || isServed;
 
-  const prepDurationMs = round.estimatedPrepTimeMin * 60 * 1000;
+  // Fall back to 15 rather than trusting the field blindly: a round stored
+  // before per-round prep times existed has no value here, and NaN would
+  // render the countdown as "NaN:NaN" and the progress bar at NaN%.
+  const prepMinutes = round.estimatedPrepTimeMin || 15;
+  const prepDurationMs = prepMinutes * 60 * 1000;
   const prepStart = round.preparingStartedAt || round.placedAt;
   const targetReadyTime = prepStart + prepDurationMs;
   const remainingSeconds = Math.max(0, Math.ceil((targetReadyTime - now) / 1000));
@@ -109,7 +113,7 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
 
       {isPending && !isOnlyRound && (
         <div className="mt-2 text-[11px] font-bold text-purple-800 flex items-center gap-1">
-          Awaiting kitchen accept (~{round.estimatedPrepTimeMin}m)
+          Awaiting kitchen accept (~{prepMinutes}m)
         </div>
       )}
 
@@ -156,7 +160,7 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
               <span>Cooking: {progressPercent}%</span>
             </div>
             <div className="flex items-center gap-1 font-mono font-black text-xs text-blue-950">
-              <Timer className="w-3.5 h-3.5 text-blue-600 animate-spin" />
+              <Timer className="w-3.5 h-3.5 text-blue-600" />
               <span>{formatCountdownStatic(remainingSeconds)} left</span>
             </div>
           </div>
@@ -171,7 +175,7 @@ const RoundBlock: React.FC<RoundBlockProps> = ({
           <div className="flex items-center justify-between text-[11px] text-blue-800">
             <span>
               Target: {new Date(targetReadyTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (
-              {round.estimatedPrepTimeMin}m total)
+              {prepMinutes}m total)
             </span>
             <button
               type="button"
@@ -289,7 +293,7 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
     ready: {
       badgeBg: 'bg-emerald-100 text-emerald-900 border-emerald-300',
       text: 'text-emerald-800',
-      label: 'READY TO SERVE',
+      label: 'READY',
       border: 'border-emerald-400 ring-2 ring-emerald-300/40 shadow-sm',
     },
     served: {
@@ -316,38 +320,47 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
       } ${isNew ? 'animate-in fade-in-50 zoom-in-95 duration-200' : ''}`}
     >
       {/* Card Header: Table Number & Status */}
-      <div className="p-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between gap-2">
-        <div>
+      {/* Nothing in this header is allowed to break mid-label. When a narrow
+          column can't fit the status badge beside the table name, the badge
+          drops to its own line instead of splitting the label in two. */}
+      <div className="p-4 bg-stone-50 border-b border-stone-100 flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xl lg:text-base font-black text-stone-950 tracking-tight">
+            <span className="text-xl lg:text-base font-black text-stone-950 tracking-tight whitespace-nowrap">
               {order.tableNumber.toUpperCase()}
             </span>
-            <span className="text-xs lg:text-[10px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-md">
+            <span className="text-xs lg:text-[10px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-md whitespace-nowrap">
               #{order.id}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-stone-500 mt-0.5">
-            <Clock className="w-3.5 h-3.5 text-stone-400" />
+          {/* Placed-at time and age stay on a single line — a wrapped
+              "(19m ago)" makes the card taller than its neighbours and
+              shuffles the whole board. */}
+          <div className="flex items-center gap-1.5 text-xs text-stone-500 mt-0.5 whitespace-nowrap">
+            <Clock className="w-3.5 h-3.5 text-stone-400 shrink-0" />
             <span className={isUrgent ? 'text-rose-600 font-bold' : ''}>
               {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               {' '}({elapsedMinutes}m ago)
             </span>
-            {isUrgent && (
-              <span className="flex items-center gap-0.5 text-[10px] font-extrabold text-rose-600 uppercase bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                <AlertCircle className="w-3 h-3" /> Delay
-              </span>
-            )}
           </div>
         </div>
 
-        <div className="text-right">
+        {/* Status column: the badge, then the delay flag stacked underneath it,
+            both hugging the right edge. ml-auto keeps them there even when a
+            narrow card pushes this column onto its own row. */}
+        <div className="shrink-0 ml-auto flex flex-col items-end gap-1 text-right">
           <span
-            className={`inline-block px-2.5 py-1 text-xs font-black uppercase tracking-wider rounded-lg border ${style.badgeBg}`}
+            className={`inline-block px-2.5 py-1 text-xs font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${style.badgeBg}`}
           >
             {style.label}
           </span>
+          {isUrgent && (
+            <span className="flex items-center gap-0.5 text-[10px] font-extrabold text-rose-600 uppercase bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 whitespace-nowrap">
+              <AlertCircle className="w-3 h-3" /> Delay
+            </span>
+          )}
           {order.customerName && (
-            <div className="text-[11px] text-stone-500 font-medium truncate max-w-30 mt-0.5">
+            <div className="text-[11px] text-stone-500 font-medium truncate max-w-30">
               Guest: {order.customerName}
             </div>
           )}
@@ -412,8 +425,8 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
               <ChefHat className="w-4 h-4" />
               <span>
                 {hasNewAddition
-                  ? `Accept New Round (~${pendingRounds[0].estimatedPrepTimeMin}m)`
-                  : `Accept & Start Preparing (~${pendingRounds[0].estimatedPrepTimeMin}m)`}
+                  ? `Accept New Round (~${pendingRounds[0].estimatedPrepTimeMin || 15}m)`
+                  : `Accept & Start Preparing (~${pendingRounds[0].estimatedPrepTimeMin || 15}m)`}
               </span>
             </button>
           )}
