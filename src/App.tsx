@@ -125,15 +125,18 @@ export const App: React.FC = () => {
       {/* Staff Navigation Bar */}
       <nav className="bg-stone-950 text-white border-b border-stone-800 sticky top-0 z-50 text-xs px-3 sm:px-6 py-2 shadow-md">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          {/* Logo / Cafe badge */}
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-            <span className="font-black tracking-tight text-white flex items-center gap-1.5">
-              <span>{cafe.name}</span>
-              <span className="text-[10px] text-amber-400 font-mono bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
-                QR SYSTEM
-              </span>
-            </span>
+          {/* Logo */}
+          <div className="flex items-center">
+            {/* Wordmark, served straight from public/ so it needs no import.
+                Intrinsic width/height are declared so the browser reserves the
+                right space before the file loads and the nav doesn't jump. */}
+            <img
+              src="/assets/logo.png"
+              alt={cafe.name}
+              width={1735}
+              height={906}
+              className="h-9 sm:h-10 w-auto shrink-0"
+            />
           </div>
 
           {/* Staff Interface Switcher */}

@@ -3,6 +3,7 @@ import { CafeInfo, Order } from '../../types';
 import { Modal } from '../common/Modal';
 import { VegBadge } from '../common/VegBadge';
 import { Clock, User, Receipt, ChefHat, Eye, Layers } from 'lucide-react';
+import { startOfDay } from '../../hooks/useTodayStart';
 
 interface TableOrderHistoryModalProps {
   isOpen: boolean;
@@ -34,10 +35,8 @@ export const TableOrderHistoryModal: React.FC<TableOrderHistoryModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const todaysOrders = orders
-    .filter((o) => o.createdAt >= todayStart.getTime())
+    .filter((o) => o.createdAt >= startOfDay())
     .sort((a, b) => b.createdAt - a.createdAt);
 
   const totalOrders = todaysOrders.length;

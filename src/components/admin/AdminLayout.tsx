@@ -277,9 +277,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             tables={tables}
             onOpenOrder={(order) => setSelectedOrderForModal(order)}
             onUpdateStatus={onUpdateOrderStatus}
-            onCombineOrders={(orderIds) => {
-              storageService.combineOrders(orderIds);
-            }}
+            onSettleTable={(tableId, tableNumber) =>
+              storageService.settleTable(tableId, tableNumber)
+            }
             onOpenCustomerMenu={onOpenCustomerMenu}
           />
         )}

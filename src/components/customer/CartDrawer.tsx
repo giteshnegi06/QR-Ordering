@@ -146,7 +146,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <span>Adding another round for {table.number}</span>
                 </div>
                 <p className="text-[11px] text-amber-900/90 leading-relaxed">
-                  You have {existingOrderCount} active {existingOrderCount === 1 ? 'order' : 'orders'} in the kitchen. If ordered within 30 minutes, items automatically join your single table bill and order ID!
+                  Your table already has a bill open. These items join it as another round under the same order ID, so you still get one single bill at the end.
                 </p>
               </div>
             )}

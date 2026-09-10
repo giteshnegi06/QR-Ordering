@@ -367,7 +367,7 @@ const SingleOrderCard: React.FC<SingleOrderCardProps> = ({
     return 0;
   })();
 
-  // Rounds: original order plus any items added within the 30-min merge window,
+  // Rounds: the original order plus anything added before the bill was settled,
   // each with its own independent prep timer so a new addition never mixes with
   // an earlier round's elapsed/remaining time. Falls back to a single synthetic
   // round for orders created before per-round tracking existed.

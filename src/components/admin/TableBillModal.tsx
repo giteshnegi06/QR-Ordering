@@ -2,7 +2,7 @@ import React from 'react';
 import { CafeInfo, Order, OrderStatus } from '../../types';
 import { Modal } from '../common/Modal';
 import { VegBadge } from '../common/VegBadge';
-import { Printer, CheckCircle2, Layers, Clock, User, Phone, Receipt } from 'lucide-react';
+import { Printer, CheckCircle2, Clock, User, Phone, Receipt } from 'lucide-react';
 
 interface TableBillModalProps {
   isOpen: boolean;
@@ -11,7 +11,6 @@ interface TableBillModalProps {
   tableNumber: string;
   orders: Order[];
   onUpdateStatus?: (orderId: string, status: OrderStatus) => void;
-  onCombineOrders?: (orderIds: string[]) => void;
 }
 
 export const TableBillModal: React.FC<TableBillModalProps> = ({
@@ -21,7 +20,6 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
   tableNumber,
   orders,
   onUpdateStatus,
-  onCombineOrders,
 }) => {
   if (!isOpen || orders.length === 0) return null;
 
@@ -76,19 +74,6 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {hasMultipleOrders && onCombineOrders && (
-              <button
-                onClick={() => {
-                  onCombineOrders(orders.map((o) => o.id));
-                }}
-                className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-                title="Permanently merge these orders into a single order ID"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Combine into Single Order ID</span>
-              </button>
-            )}
-
             <button
               onClick={handlePrint}
               className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"

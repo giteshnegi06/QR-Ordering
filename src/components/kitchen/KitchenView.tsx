@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CafeInfo, Order, OrderStatus } from '../../types';
 import { storageService } from '../../services/storage';
+import { useTodayStart } from '../../hooks/useTodayStart';
 import { soundService } from '../../services/sound';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import {
@@ -71,16 +72,28 @@ export const KitchenView: React.FC<KitchenViewProps> = () => {
     storageService.updateRoundStatus(orderId, roundNumber, newStatus);
   };
 
+  // Served orders are last night's history the moment the day rolls over —
+  // the pass only needs to look back at what it sent out during *this*
+  // service, so this list empties itself at midnight (useTodayStart re-renders
+  // on the boundary, so a screen left running overnight resets unattended).
+  //
+  // The active queues below are deliberately NOT date-scoped: an order still
+  // cooking as the clock passes midnight has to stay on the board.
+  const todayStart = useTodayStart();
+  const servedOrders = useMemo(
+    () => orders.filter((o) => o.status === 'served' && o.createdAt >= todayStart),
+    [orders, todayStart]
+  );
+
   // Counts
   const counts = useMemo(() => {
     const received = orders.filter((o) => o.status === 'received').length;
     const preparing = orders.filter((o) => o.status === 'preparing').length;
     const ready = orders.filter((o) => o.status === 'ready').length;
     const active = received + preparing + ready;
-    const served = orders.filter((o) => o.status === 'served').length;
 
-    return { received, preparing, ready, active, served };
-  }, [orders]);
+    return { received, preparing, ready, active, served: servedOrders.length };
+  }, [orders, servedOrders]);
 
   // Filtered orders
   const filteredOrders = useMemo(() => {
@@ -96,11 +109,11 @@ export const KitchenView: React.FC<KitchenViewProps> = () => {
       case 'ready':
         return orders.filter((o) => o.status === 'ready');
       case 'served':
-        return orders.filter((o) => o.status === 'served');
+        return servedOrders;
       default:
         return orders;
     }
-  }, [orders, activeTab]);
+  }, [orders, servedOrders, activeTab]);
 
   return (
     <div className="min-h-screen bg-stone-900 text-stone-100 pb-16">

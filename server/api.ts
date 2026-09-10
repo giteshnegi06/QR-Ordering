@@ -797,7 +797,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     // Idempotency guard. The client POSTs with the id it already assigned
     // locally, and re-POSTs that same order if its first attempt looked like it
     // failed (a slow response, a dropped connection). Without this check the
-    // re-send falls through to the 30-min merge rule below and gets recorded as
+    // re-send falls through to the open-bill merge rule below and gets recorded as
     // an extra ROUND on the very order it was trying to create — one phantom
     // round per retry. If we already have this id, the write is already done.
     if (orderData.id) {
@@ -869,14 +869,27 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
       return check.rows.length > 0 ? rawId : null;
     };
 
-    // 1. Check if there is an active order placed for this table within 30 minutes
+    // 1. Join the table's open bill if it has one. A bill stays open from the
+    //    first order until an admin settles it with Paid — no time window — so
+    //    everything the table orders in between lands on one order id as an
+    //    extra round. payment_status is the source of truth (see findOpenBill
+    //    on the client): serving the food no longer closes anything.
     if (!forceNew) {
-      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
+      // The table must still be occupied for its bill to count as open — see
+      // findOpenBill on the client. Without that join an order left unpaid on
+      // some earlier day stays joinable forever and swallows every future
+      // customer at that table. Ordering prefers the bill the table itself
+      // points at, falling back to its newest unpaid order.
       const activeRes = await query(
-        `SELECT id FROM orders
-         WHERE table_id = $1 AND status NOT IN ('served', 'cancelled') AND created_at >= $2
-         ORDER BY created_at DESC LIMIT 1`,
-        [orderData.tableId, thirtyMinsAgo]
+        `SELECT o.id FROM orders o
+         JOIN tables t ON t.id = o.table_id
+         WHERE o.table_id = $1
+           AND t.status = 'occupied'
+           AND o.status <> 'cancelled'
+           AND o.payment_status <> 'paid'
+         ORDER BY (o.id = t.active_order_id) DESC, o.created_at DESC
+         LIMIT 1`,
+        [orderData.tableId]
       );
 
       if (activeRes.rows.length > 0) {
@@ -942,8 +955,22 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
         // claimed newRoundNumber — writing them again from the values read
         // earlier would clobber a concurrent round's contribution.
 
+        // A round added to a bill the kitchen had already finished has to pull
+        // the order back into the active queue — without this the order keeps
+        // its 'served' status and the new round is never cooked.
+        await recomputeOrderStatus(existing.id);
+
+        // Keep the table pinned to the bill this round just joined. A no-op
+        // in the normal case, but it heals a table whose occupied flag was
+        // lost, rather than leaving the board disagreeing with the orders.
+        await query(
+          `UPDATE tables SET status = 'occupied', active_order_id = $1 WHERE id = $2`,
+          [existing.id, orderData.tableId]
+        );
+
         const updatedOrders = await fetchFullOrders('WHERE id = $1', [existing.id]);
         notifyResourceChanged('orders');
+        notifyResourceChanged('tables');
         return res.json(updatedOrders[0]);
       }
     }
@@ -1039,21 +1066,63 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
   }
 });
 
+// The admin's Paid button: settles a table's open bill and hands the table
+// back, so the next order from it starts a fresh order id.
+apiRouter.post('/tables/:id/settle', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const openRes = await query(
+      `SELECT id FROM orders
+       WHERE table_id = $1 AND status <> 'cancelled' AND payment_status <> 'paid'
+       ORDER BY created_at DESC LIMIT 1`,
+      [id]
+    );
+
+    // Release the table either way. No open bill means it should not have been
+    // showing as occupied in the first place, and refusing to free it would
+    // leave the admin staring at a Paid button that does nothing.
+    if (openRes.rows.length > 0) {
+      const orderId = openRes.rows[0].id;
+      // A paid bill closes the meal out: any round the kitchen never ticked
+      // off is marked served here rather than left sitting on the pass.
+      await query(
+        `UPDATE orders SET payment_status = 'paid', status = 'served', updated_at = now() WHERE id = $1`,
+        [orderId]
+      );
+      await query(
+        `UPDATE order_rounds SET status = 'served' WHERE order_id = $1 AND status <> 'cancelled'`,
+        [orderId]
+      );
+    }
+
+    await query(
+      `UPDATE tables SET status = 'available', active_order_id = NULL WHERE id = $1`,
+      [id]
+    );
+
+    notifyResourceChanged('orders');
+    notifyResourceChanged('tables');
+
+    const settled = openRes.rows.length > 0
+      ? await fetchFullOrders('WHERE id = $1', [openRes.rows[0].id])
+      : [];
+    res.json({ settledOrder: settled[0] || null });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 apiRouter.patch('/orders/:id/status', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    // Update orders table
-    const paymentStatus = status === 'served' ? 'paid' : undefined;
-    if (paymentStatus) {
-      await query(
-        'UPDATE orders SET status = $1, payment_status = $2, updated_at = now() WHERE id = $3',
-        [status, paymentStatus, id]
-      );
-    } else {
-      await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
-    }
+    // Status only. Serving deliberately does NOT mark the bill paid: it is
+    // payment_status that holds a table's tab open, so settling it here would
+    // split the table's next round onto a new order id. Payment happens once,
+    // through POST /tables/:id/settle.
+    await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
 
     // Update all rounds
     if (status === 'preparing') {
@@ -1069,19 +1138,26 @@ apiRouter.patch('/orders/:id/status', async (req: Request, res: Response) => {
     } else if (status === 'served' || status === 'cancelled') {
       await query('UPDATE order_rounds SET status = $1 WHERE order_id = $2', [status, id]);
 
-      // Release table if no other active orders exist
-      const ordRes = await query('SELECT table_id FROM orders WHERE id = $1', [id]);
-      if (ordRes.rows.length > 0) {
-        const tableId = ordRes.rows[0].table_id;
-        const otherRes = await query(
-          `SELECT count(*) FROM orders WHERE table_id = $1 AND id != $2 AND status IN ('received', 'preparing', 'ready')`,
-          [tableId, id]
-        );
-        if (parseInt(otherRes.rows[0].count, 10) === 0) {
-          await query(
-            `UPDATE tables SET status = 'available', active_order_id = NULL WHERE id = $1`,
-            [tableId]
+      // Serving does NOT release the table any more — the party is still
+      // seated and can add to this same bill. Only POST /tables/:id/settle
+      // (the admin's Paid button) does that.
+      //
+      // A cancelled order is the exception: there is nothing left to pay, so
+      // release the table unless it still has another bill open.
+      if (status === 'cancelled') {
+        const ordRes = await query('SELECT table_id FROM orders WHERE id = $1', [id]);
+        if (ordRes.rows.length > 0) {
+          const tableId = ordRes.rows[0].table_id;
+          const otherRes = await query(
+            `SELECT count(*) FROM orders WHERE table_id = $1 AND id != $2 AND status <> 'cancelled' AND payment_status <> 'paid'`,
+            [tableId, id]
           );
+          if (parseInt(otherRes.rows[0].count, 10) === 0) {
+            await query(
+              `UPDATE tables SET status = 'available', active_order_id = NULL WHERE id = $1`,
+              [tableId]
+            );
+          }
         }
       }
     }
@@ -1094,6 +1170,29 @@ apiRouter.patch('/orders/:id/status', async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Recomputes an order's overall status from its rounds and stores it.
+//
+// Mirrors the client's computeAggregateOrderStatus: a round that is already
+// served/cancelled is done and must not count against "are the remaining
+// rounds all ready" — otherwise an order with 2 served rounds + 1 ready round
+// falls through every check and wrongly lands back on 'preparing', freezing
+// the badge at the wrong value forever.
+async function recomputeOrderStatus(orderId: string): Promise<string> {
+  const allRounds = await query('SELECT status FROM order_rounds WHERE order_id = $1', [orderId]);
+  const statuses = allRounds.rows.map((r) => r.status);
+  const activeStatuses = statuses.filter((s) => s !== 'served' && s !== 'cancelled');
+
+  let aggregate = 'preparing';
+  if (statuses.every((s) => s === 'served')) aggregate = 'served';
+  else if (statuses.every((s) => s === 'cancelled')) aggregate = 'cancelled';
+  else if (activeStatuses.length === 0) aggregate = 'served';
+  else if (activeStatuses.every((s) => s === 'ready')) aggregate = 'ready';
+  else if (activeStatuses.every((s) => s === 'received')) aggregate = 'received';
+
+  await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [aggregate, orderId]);
+  return aggregate;
+}
 
 apiRouter.patch('/orders/:id/rounds/:roundNumber/status', async (req: Request, res: Response) => {
   try {
@@ -1118,26 +1217,7 @@ apiRouter.patch('/orders/:id/rounds/:roundNumber/status', async (req: Request, r
       );
     }
 
-    // Recompute overall order status
-    const allRounds = await query(
-      'SELECT status FROM order_rounds WHERE order_id = $1',
-      [id]
-    );
-    const statuses = allRounds.rows.map((r) => r.status);
-    // Mirror the client's computeAggregateOrderStatus: a round that's already
-    // served/cancelled is done and must not count against "are the remaining
-    // rounds all ready" — otherwise a table with 2 served rounds + 1 ready
-    // round falls through every check below and wrongly lands back on
-    // 'preparing', freezing the order status at the wrong badge forever.
-    const activeStatuses = statuses.filter((s) => s !== 'served' && s !== 'cancelled');
-    let aggregate = 'preparing';
-    if (statuses.every((s) => s === 'served')) aggregate = 'served';
-    else if (statuses.every((s) => s === 'cancelled')) aggregate = 'cancelled';
-    else if (activeStatuses.length === 0) aggregate = 'served';
-    else if (activeStatuses.every((s) => s === 'ready')) aggregate = 'ready';
-    else if (activeStatuses.every((s) => s === 'received')) aggregate = 'received';
-
-    await query('UPDATE orders SET status = $1, updated_at = now() WHERE id = $2', [aggregate, id]);
+    const aggregate = await recomputeOrderStatus(id);
 
     const updated = await fetchFullOrders('WHERE id = $1', [id]);
     notifyResourceChanged('orders');

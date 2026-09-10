@@ -250,8 +250,8 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
     storageService.updateOrderPrepTime(order.id, 5, true, roundNumber);
   };
 
-  // Rounds: the original order plus any items added within the 30-min merge
-  // window, each carrying its own independent prep timer. Fall back to a
+  // Rounds: the original order plus anything added before the bill was settled,
+  // each carrying its own independent prep timer. Fall back to a
   // single synthetic round for orders created before this tracking existed.
   const rounds: OrderRound[] =
     order.rounds && order.rounds.length > 0
@@ -324,7 +324,7 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
           column can't fit the status badge beside the table name, the badge
           drops to its own line instead of splitting the label in two. */}
       <div className="p-4 bg-stone-50 border-b border-stone-100 flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-xl lg:text-base font-black text-stone-950 tracking-tight whitespace-nowrap">
               {order.tableNumber.toUpperCase()}
@@ -343,11 +343,17 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
               {' '}({elapsedMinutes}m ago)
             </span>
           </div>
+          {order.customerName && (
+            <div className="text-[11px] text-stone-500 font-medium truncate mt-0.5">
+              Guest: {order.customerName}
+            </div>
+          )}
         </div>
 
         {/* Status column: the badge, then the delay flag stacked underneath it,
-            both hugging the right edge. ml-auto keeps them there even when a
-            narrow card pushes this column onto its own row. */}
+            both hugging the right edge. Only badge-width content lives here —
+            anything wider (the guest name) belongs in the left column, or this
+            column gets wide enough to wrap onto its own row. */}
         <div className="shrink-0 ml-auto flex flex-col items-end gap-1 text-right">
           <span
             className={`inline-block px-2.5 py-1 text-xs font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${style.badgeBg}`}
@@ -358,11 +364,6 @@ export const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({
             <span className="flex items-center gap-0.5 text-[10px] font-extrabold text-rose-600 uppercase bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 whitespace-nowrap">
               <AlertCircle className="w-3 h-3" /> Delay
             </span>
-          )}
-          {order.customerName && (
-            <div className="text-[11px] text-stone-500 font-medium truncate max-w-30">
-              Guest: {order.customerName}
-            </div>
           )}
         </div>
       </div>

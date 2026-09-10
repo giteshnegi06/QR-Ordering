@@ -371,8 +371,8 @@ class StorageService {
     this.ordersBeingSynced.add(order.id);
 
     try {
-      // force=true so the server skips its 30-min "fold this into the table's
-      // active order" rule. A retry is asking for one specific order to exist
+      // force=true so the server skips its "fold this into the table's open
+      // bill" rule. A retry is asking for one specific order to exist
       // under one specific id — never for a round to be tacked onto whatever
       // else that table happens to have open. Paired with the server's
       // id-already-exists check, re-sending is then a no-op rather than a
@@ -382,9 +382,9 @@ class StorageService {
         body: JSON.stringify(order),
       });
       if (serverOrder) {
-        // The server may have merged this into an already-existing active
-        // order for the table (the same 30-min-combine rule createOrder
-        // uses) instead of creating a fresh row under our id — drop the
+        // The server may have merged this into the table's open bill (the
+        // same open-tab rule createOrder uses) instead of creating a fresh
+        // row under our id — drop the
         // phantom entry either way rather than risk a duplicate-id row.
         const withoutPhantom = this.getOrders().filter((o) => o.id !== order.id);
         const next = withoutPhantom.some((o) => o.id === serverOrder.id)
@@ -710,23 +710,21 @@ class StorageService {
   ): Order {
     const orders = this.getOrders();
     const now = Date.now();
-    const THIRTY_MINS_MS = 30 * 60 * 1000;
 
-    // Check if there is an active order for the same table placed within 30 minutes
+    // A table's bill stays open from its first order until an admin settles it
+    // with Paid — there is no time window. Everything ordered in between joins
+    // that same order id as another round, so a party that sits for three hours
+    // still leaves with one bill.
+    //
+    // `paymentStatus` is the source of truth rather than the table's occupied
+    // flag or its activeOrderId pointer, because it lives on the order itself:
+    // it cannot drift out of sync with the orders it describes the way a
+    // separately-written table flag can (and did).
     const existingActiveOrder = !options?.forceNewOrder
-      ? orders.find(
-          (o) =>
-            (o.tableId === orderData.tableId ||
-              o.tableNumber.toLowerCase() === orderData.tableNumber.toLowerCase()) &&
-            o.status !== 'served' &&
-            o.status !== 'cancelled' &&
-            now - o.createdAt <= THIRTY_MINS_MS
-        )
+      ? this.findOpenBill(orders, orderData.tableId, orderData.tableNumber)
       : null;
 
     if (existingActiveOrder) {
-      const cafe = this.getCafe();
-
       // Backfill round 1 for orders created before per-round tracking existed
       if (!existingActiveOrder.rounds || existingActiveOrder.rounds.length === 0) {
         existingActiveOrder.rounds = [
@@ -899,93 +897,91 @@ class StorageService {
     return newOrder;
   }
 
-  public combineOrders(orderIds: string[]): Order | null {
-    if (!orderIds || orderIds.length < 2) return null;
-    const orders = this.getOrders();
-    const ordersToCombine = orders.filter((o) => orderIds.includes(o.id));
-    if (ordersToCombine.length < 2) return null;
+  // The one open bill a table is currently running, if any.
+  //
+  // Two conditions, and the table's own flag is the first of them: an order
+  // only counts as an open tab while the table it belongs to is still
+  // occupied. That is what stops a new party from inheriting a bill that was
+  // never settled on some earlier day — the table was handed back at some
+  // point, so whatever it still owes is history, not a running tab. Without
+  // this gate an unpaid order stays joinable forever and every future customer
+  // at that table ends up on it.
+  private findOpenBill(orders: Order[], tableId: string, tableNumber?: string): Order | undefined {
+    const num = tableNumber?.toLowerCase();
+    const table = this.getTables().find(
+      (t) => t.id === tableId || t.code === tableId || (!!num && t.number.toLowerCase() === num)
+    );
+    if (!table || table.status !== 'occupied') return undefined;
 
-    // Earliest order is primary
-    ordersToCombine.sort((a, b) => a.createdAt - b.createdAt);
-    const primaryOrder = ordersToCombine[0];
-    const secondaryOrders = ordersToCombine.slice(1);
-    const cafe = this.getCafe();
-    const now = Date.now();
+    const isOpen = (o: Order) => o.status !== 'cancelled' && o.paymentStatus !== 'paid';
 
-    if (!primaryOrder.mergedOrderIds) {
-      primaryOrder.mergedOrderIds = [];
-    }
+    // The pointer the table itself carries wins while it still resolves to an
+    // open bill; the scan below is the fallback, so a pointer that went
+    // missing cannot split one sitting across two order ids. Matched on
+    // tableId first and table number second, because an order placed before a
+    // table was renamed still belongs to that table.
+    const pointed = table.activeOrderId
+      ? orders.find((o) => o.id === table.activeOrderId && isOpen(o))
+      : undefined;
+    if (pointed) return pointed;
 
-    // Merge items from secondary orders
-    for (const secOrder of secondaryOrders) {
-      if (!primaryOrder.mergedOrderIds.includes(secOrder.id)) {
-        primaryOrder.mergedOrderIds.push(secOrder.id);
-      }
-
-      for (const secItem of secOrder.items) {
-        const existingIdx = primaryOrder.items.findIndex(
-          (it) =>
-            it.menuItemId === secItem.menuItemId &&
-            JSON.stringify(it.selectedCustomizations) === JSON.stringify(secItem.selectedCustomizations) &&
-            (it.specialInstructions || '') === (secItem.specialInstructions || '')
-        );
-        if (existingIdx >= 0) {
-          primaryOrder.items[existingIdx].quantity += secItem.quantity;
-          primaryOrder.items[existingIdx].itemTotal = Number(
-            (primaryOrder.items[existingIdx].itemTotal + secItem.itemTotal).toFixed(2)
-          );
-        } else {
-          primaryOrder.items.push({ ...secItem });
-        }
-      }
-
-      if (secOrder.specialInstructions) {
-        primaryOrder.specialInstructions = primaryOrder.specialInstructions
-          ? `${primaryOrder.specialInstructions}; (Merged #${secOrder.id}: ${secOrder.specialInstructions})`
-          : secOrder.specialInstructions;
-      }
-    }
-
-    // Recalculate bill
-    const subtotal = Number(primaryOrder.items.reduce((sum, item) => sum + item.itemTotal, 0).toFixed(2));
-    const mergeCafe = this.getCafe();
-    const tax = Number(((subtotal * mergeCafe.taxPercent) / 100).toFixed(2));
-    const serviceCharge = Number(((subtotal * mergeCafe.serviceChargePercent) / 100).toFixed(2));
-    const total = Number((subtotal + tax + serviceCharge).toFixed(2));
-
-    primaryOrder.subtotal = subtotal;
-    primaryOrder.tax = tax;
-    primaryOrder.serviceCharge = serviceCharge;
-    primaryOrder.total = total;
-    primaryOrder.updatedAt = now;
-    primaryOrder.isMerged = true;
-    primaryOrder.orderRounds = (primaryOrder.orderRounds || 1) + secondaryOrders.length;
-
-    // Filter out secondary orders from active list
-    const secondaryIds = new Set(secondaryOrders.map((o) => o.id));
-    const remainingOrders = orders.filter((o) => !secondaryIds.has(o.id));
-
-    // Update primary order in remainingOrders
-    const pIdx = remainingOrders.findIndex((o) => o.id === primaryOrder.id);
-    if (pIdx >= 0) {
-      remainingOrders[pIdx] = primaryOrder;
-    }
-
-    this.saveOrders(remainingOrders);
-    this.notify('ORDERS_UPDATED', remainingOrders);
-    return primaryOrder;
+    return orders.find(
+      (o) => (o.tableId === tableId || (!!num && o.tableNumber.toLowerCase() === num)) && isOpen(o)
+    );
   }
 
-  public combineOrdersForTable(tableIdentifier: string): Order | null {
+  // Frees a table once nothing is left to pay on it. Deliberately re-derives
+  // the answer from the orders themselves instead of trusting the stored flag,
+  // so a table can never be stranded as occupied by a write that went missing.
+  private releaseTableIfNoOpenBill(orders: Order[], tableId: string): void {
+    if (this.findOpenBill(orders, tableId)) return;
+    this.updateTable(tableId, { status: 'available', activeOrderId: null });
+  }
+
+  // Returns the bill a table currently owes, for the admin's Paid button.
+  public getOpenBillForTable(tableId: string, tableNumber?: string): Order | null {
+    return this.findOpenBill(this.getOrders(), tableId, tableNumber) || null;
+  }
+
+  // The Paid button. Settles a table's open bill and hands the table back:
+  //
+  //   - the order is marked paid and closed out as served (a bill being paid
+  //     means the meal is over, so any round the kitchen never got around to
+  //     ticking off is closed here rather than left cluttering the pass),
+  //   - the table returns to 'available' with its activeOrderId cleared,
+  //   - which means the next order from that table starts a fresh order id.
+  // Settling a table with no open bill is not an error: that table should not
+  // have been showing as occupied, so it is freed anyway rather than leaving
+  // the admin with a button that does nothing.
+  public settleTable(tableId: string, tableNumber?: string): Order | null {
     const orders = this.getOrders();
-    const tableOrders = orders.filter(
-      (o) =>
-        (o.tableId === tableIdentifier || o.tableNumber.toLowerCase() === tableIdentifier.toLowerCase()) &&
-        o.status !== 'served' &&
-        o.status !== 'cancelled'
-    );
-    if (tableOrders.length < 2) return null;
-    return this.combineOrders(tableOrders.map((o) => o.id));
+    const order = this.findOpenBill(orders, tableId, tableNumber);
+
+    if (!order) {
+      this.updateTable(tableId, { status: 'available', activeOrderId: null });
+      this.apiFetch(`/tables/${tableId}/settle`, { method: 'POST' }).catch(() => {});
+      return null;
+    }
+
+    const now = Date.now();
+    order.paymentStatus = 'paid';
+    order.status = 'served';
+    order.updatedAt = now;
+    if (order.rounds) {
+      order.rounds.forEach((r) => {
+        if (r.status !== 'cancelled') r.status = 'served';
+      });
+    }
+
+    this.saveOrders(orders);
+    // Marked paid above before this runs: releaseTableIfNoOpenBill scans this
+    // same array, so the bill it is deciding about has to already read as
+    // settled or the table stays occupied by the very order we just paid.
+    this.releaseTableIfNoOpenBill(orders, order.tableId);
+    this.notify('ORDERS_UPDATED', orders);
+
+    this.apiFetch(`/tables/${order.tableId}/settle`, { method: 'POST' }).catch(() => {});
+    return order;
   }
 
   // A round's prep timer is the slowest dish's own time, plus 1 extra minute
@@ -1092,18 +1088,15 @@ class StorageService {
 
     order.updatedAt = now;
 
-    if (status === 'served') {
-      order.paymentStatus = 'paid';
-      // Mark table available if no other active orders
-      const remainingActive = orders.some((o) => o.tableId === order.tableId && o.id !== orderId && (o.status === 'received' || o.status === 'preparing' || o.status === 'ready'));
-      if (!remainingActive) {
-        this.updateTable(order.tableId, { status: 'available', activeOrderId: undefined });
-      }
-    } else if (status === 'cancelled') {
-      const remainingActive = orders.some((o) => o.tableId === order.tableId && o.id !== orderId && (o.status === 'received' || o.status === 'preparing' || o.status === 'ready'));
-      if (!remainingActive) {
-        this.updateTable(order.tableId, { status: 'available', activeOrderId: undefined });
-      }
+    // Serving the food no longer frees the table or marks the bill paid — the
+    // party is still sitting there and may well order again onto this same
+    // bill. Only settleTable() (the admin's Paid button) closes a tab.
+    //
+    // Cancelling is the exception: a voided order leaves nothing to pay, so if
+    // it was the table's only open bill the table is released rather than
+    // stranding it as permanently occupied.
+    if (status === 'cancelled') {
+      this.releaseTableIfNoOpenBill(orders, order.tableId);
     }
 
     this.saveOrders(orders);
@@ -1139,18 +1132,7 @@ class StorageService {
       order.readyAt = now;
     }
 
-    if (aggregateStatus === 'served') {
-      order.paymentStatus = 'paid';
-      const remainingActive = orders.some(
-        (o) =>
-          o.tableId === order.tableId &&
-          o.id !== orderId &&
-          (o.status === 'received' || o.status === 'preparing' || o.status === 'ready')
-      );
-      if (!remainingActive) {
-        this.updateTable(order.tableId, { status: 'available', activeOrderId: undefined });
-      }
-    }
+    // Every round being served still leaves the bill open — see updateOrderStatus.
 
     this.saveOrders(orders);
     soundService.playStatusUpdateBlip();

@@ -437,7 +437,7 @@ export const swaggerDocument = {
       post: {
         tags: ['Orders'],
         summary: 'Place a customer order or add round',
-        description: 'Places an order from a table QR code. Automatically appends as an extra round if the table has an active order within 30 minutes, or sets force=true to create a distinct ticket.',
+        description: "Places an order from a table QR code. Automatically appends as an extra round to the table's open (unpaid) bill if it has one, so a table keeps a single order id until an admin settles it with Paid. Set force=true to create a distinct ticket instead.",
         parameters: [
           {
             name: 'force',

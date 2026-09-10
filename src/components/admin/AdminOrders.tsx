@@ -21,8 +21,25 @@ import {
   ChevronRight,
   Receipt,
   Utensils,
+  IndianRupee,
 } from 'lucide-react';
 import { VegBadge } from '../common/VegBadge';
+import { useTodayStart } from '../../hooks/useTodayStart';
+
+// One table's row on the board: the table itself plus the orders grouped
+// under it, and — the part that drives the Paid button — the single bill it
+// currently has open, if any.
+interface TableCard {
+  tableNumber: string;
+  tableId?: string;
+  capacity?: number;
+  tableItem?: TableItem;
+  allOrders: Order[];
+  activeOrders: Order[];
+  openBill: Order | null;
+  newestActiveTimestamp: number;
+  latestTimestamp: number;
+}
 
 interface AdminOrdersProps {
   cafe: CafeInfo;
@@ -30,7 +47,7 @@ interface AdminOrdersProps {
   tables: TableItem[];
   onOpenOrder: (order: Order) => void;
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
-  onCombineOrders?: (orderIds: string[]) => void;
+  onSettleTable?: (tableId: string, tableNumber: string) => void;
   onOpenCustomerMenu?: (tableId: string) => void;
 }
 
@@ -40,7 +57,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
   tables,
   onOpenOrder,
   onUpdateStatus,
-  onCombineOrders,
+  onSettleTable,
   onOpenCustomerMenu,
 }) => {
   const [viewMode, setViewMode] = useState<'tables' | 'list'>('tables');
@@ -59,7 +76,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
     orders: Order[];
   } | null>(null);
 
-  // Success message toast for actions like combining
+  // Success message toast for actions like settling a table
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const showNotice = (msg: string) => {
@@ -67,22 +84,20 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
     setTimeout(() => setActionNotice(null), 4000);
   };
 
+  // Order Management is a live board for the current service, not an archive:
+  // only orders placed since midnight belong on it. Every derived list below
+  // reads from this, and useTodayStart re-renders on the day rollover, so a
+  // screen left running overnight wipes itself back to empty tables on its own.
+  const todayStart = useTodayStart();
+  const todaysOrders = useMemo(
+    () => orders.filter((o) => o.createdAt >= todayStart),
+    [orders, todayStart]
+  );
+
   // Group orders by Table Number
   const tableCardsData = useMemo(() => {
     // Collect all table representations
-    const tableMap = new Map<
-      string,
-      {
-        tableNumber: string;
-        tableId?: string;
-        capacity?: number;
-        tableItem?: TableItem;
-        allOrders: Order[];
-        activeOrders: Order[];
-        newestActiveTimestamp: number;
-        latestTimestamp: number;
-      }
-    >();
+    const tableMap = new Map<string, TableCard>();
 
     // First seed with configured tables
     tables.forEach((t) => {
@@ -93,13 +108,14 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
         tableItem: t,
         allOrders: [],
         activeOrders: [],
+        openBill: null,
         newestActiveTimestamp: 0,
         latestTimestamp: 0,
       });
     });
 
     // Populate orders into table groups
-    orders.forEach((o) => {
+    todaysOrders.forEach((o) => {
       const key = o.tableNumber.toLowerCase();
       let group = tableMap.get(key);
       if (!group) {
@@ -109,6 +125,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
           capacity: 4,
           allOrders: [],
           activeOrders: [],
+          openBill: null,
           newestActiveTimestamp: 0,
           latestTimestamp: 0,
         };
@@ -116,6 +133,15 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
       }
 
       group.allOrders.push(o);
+
+      // The table's running tab: not cancelled, not yet paid. This is the
+      // order any further items from this table will join, and the one the
+      // Paid button settles. It stays open after the food is served.
+      if (o.status !== 'cancelled' && o.paymentStatus !== 'paid') {
+        if (!group.openBill || o.createdAt > group.openBill.createdAt) {
+          group.openBill = o;
+        }
+      }
 
       const isActive = o.status !== 'served' && o.status !== 'cancelled';
       if (isActive) {
@@ -155,7 +181,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
     });
 
     return groups;
-  }, [tables, orders]);
+  }, [tables, todaysOrders]);
 
   // Filtered Table Cards
   const filteredTableCards = useMemo(() => {
@@ -187,7 +213,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
 
   // Filtered flat orders for List view
   const filteredOrdersList = useMemo(() => {
-    return orders.filter((order) => {
+    return todaysOrders.filter((order) => {
       if (statusFilter === 'active') {
         if (order.status === 'served' || order.status === 'cancelled') return false;
       } else if (statusFilter !== 'all' && order.status !== statusFilter) {
@@ -205,27 +231,52 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
 
       return true;
     });
-  }, [orders, statusFilter, searchQuery]);
+  }, [todaysOrders, statusFilter, searchQuery]);
 
-  // Handle manual combine for a table
-  const handleCombineTableOrders = (orderIds: string[], tableNum: string) => {
-    if (!onCombineOrders) return;
-    if (orderIds.length < 2) return;
+  // Settle a table's bill. This is the only thing that frees a table, so it is
+  // also what decides where the table's NEXT order lands: once paid, the table
+  // is available again and the next customer starts a fresh order id.
+  const handleSettleTable = (card: TableCard) => {
+    if (!onSettleTable) return;
+    const openBill = card.openBill;
+
+    // A table showing occupied with nothing to pay is stale state, not a bill.
+    // Settling it just hands the table back, which is the only way to clear
+    // one from the board.
+    if (!openBill) {
+      if (window.confirm(`${card.tableNumber} has no open bill. Mark it available?`)) {
+        onSettleTable(card.tableId || card.tableNumber, card.tableNumber);
+        showNotice(`${card.tableNumber} is now available.`);
+      }
+      return;
+    }
+
+    // Paying closes the meal out, including anything the kitchen has not
+    // ticked off — worth saying out loud before it happens.
+    const unserved = (openBill.rounds || []).filter(
+      (r) => r.status !== 'served' && r.status !== 'cancelled'
+    ).length;
+    const warning = unserved
+      ? `
+
+Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen and will be closed as served.`
+      : '';
+
     if (
       window.confirm(
-        `Combine ${orderIds.length} orders for ${tableNum} into a single bill & order ID?`
+        `Mark #${openBill.id} (${cafe.currency}${openBill.total.toFixed(2)}) as PAID and free ${card.tableNumber}?${warning}`
       )
     ) {
-      onCombineOrders(orderIds);
-      showNotice(`Successfully combined orders for ${tableNum} into a single bill!`);
+      onSettleTable(card.tableId || card.tableNumber, card.tableNumber);
+      showNotice(`${card.tableNumber} settled — #${openBill.id} paid and table is available.`);
     }
   };
 
-  const totalActiveOrders = orders.filter(
+  const totalActiveOrders = todaysOrders.filter(
     (o) => o.status === 'received' || o.status === 'preparing' || o.status === 'ready'
   ).length;
 
-  const totalNewOrders = orders.filter((o) => o.status === 'received').length;
+  const totalNewOrders = todaysOrders.filter((o) => o.status === 'received').length;
 
   const availableTablesCount = tables.filter((t) => t.status === 'available').length;
   const occupiedTablesCount = tables.filter((t) => t.status === 'occupied').length;
@@ -349,22 +400,15 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                 const hasNewOrder = card.activeOrders.some((o) => o.status === 'received');
                 const hasPreparing = card.activeOrders.some((o) => o.status === 'preparing');
                 const hasReady = card.activeOrders.some((o) => o.status === 'ready');
-                const hasMultipleOrders = card.activeOrders.length > 1;
+                // The tab this table is running. Present from its first order
+                // until Paid settles it — so it outlives 'served', unlike
+                // hasActive above, which only tracks food still in the kitchen.
+                const openBill = card.openBill;
 
-                // Total active amount (without tax)
-                const activeTotal = card.activeOrders.reduce(
-                  (sum, o) => sum + (o.subtotal + (o.serviceCharge || 0)),
-                  0
-                );
                 const activeItemsCount = card.activeOrders.reduce(
                   (sum, o) => sum + o.items.reduce((s, it) => s + it.quantity, 0),
                   0
                 );
-
-                // Check 30-min window for auto-combining
-                const earliestActive = card.activeOrders[0];
-                const isWithin30Mins =
-                  earliestActive && Date.now() - earliestActive.createdAt <= 30 * 60 * 1000;
 
                 return (
                   <div
@@ -472,41 +516,19 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                         ) : null}
                       </div>
 
-                      {/* 30-min window banner */}
-                      {isWithin30Mins && hasActive && (
+                      {/* Open-tab banner: says which order id anything else this
+                          table orders will land on, until it is settled. */}
+                      {openBill && (
                         <div className="mt-2.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200/80 rounded-xl text-[11px] text-amber-900 flex items-center justify-between gap-2">
                           <span className="flex items-center gap-1.5 font-semibold">
-                            <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                            <span>30-min single bill window active</span>
+                            <Receipt className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                            <span>Open bill #{openBill.id}</span>
                           </span>
                           <span className="text-[10px] text-amber-700">
-                            Orders count in #{earliestActive.id}
+                            {openBill.orderRounds && openBill.orderRounds > 1
+                              ? `${openBill.orderRounds} rounds • further orders join this bill`
+                              : 'Further orders join this bill'}
                           </span>
-                        </div>
-                      )}
-
-                      {/* Multi-Order Combining option banner */}
-                      {hasMultipleOrders && (
-                        <div className="mt-2.5 p-2.5 bg-blue-50/90 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
-                          <div className="text-[11px] text-blue-900 font-medium">
-                            <strong>{card.activeOrders.length} separate orders</strong> for this
-                            table ({card.activeOrders.map((o) => `#${o.id}`).join(', ')})
-                          </div>
-                          {onCombineOrders && (
-                            <button
-                              onClick={() =>
-                                handleCombineTableOrders(
-                                  card.activeOrders.map((o) => o.id),
-                                  card.tableNumber
-                                )
-                              }
-                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg shadow-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-                              title="Merge into a single order ID and bill"
-                            >
-                              <Layers className="w-3 h-3" />
-                              <span>Combine Orders</span>
-                            </button>
-                          )}
                         </div>
                       )}
                     </div>
@@ -642,10 +664,12 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                     <div className="p-4 bg-stone-50/80 border-t border-stone-100 flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                          {hasActive ? 'Active Table Bill' : 'Table Status'}
+                          {openBill ? 'Open Table Bill' : 'Table Status'}
                         </div>
                         <div className="text-base font-black text-stone-900">
-                          {hasActive ? `${cafe.currency}${activeTotal.toFixed(2)}` : 'Available'}
+                          {openBill
+                            ? `${cafe.currency}${openBill.total.toFixed(2)}`
+                            : 'Available'}
                         </div>
                       </div>
 
@@ -690,6 +714,31 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                             )}
                           </>
                         )}
+
+                        {onSettleTable &&
+                          (openBill || card.tableItem?.status === 'occupied' ? (
+                            <button
+                              onClick={() => handleSettleTable(card)}
+                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-stone-950 rounded-xl text-xs font-black shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+                              title={
+                                openBill
+                                  ? `Settle #${openBill.id} and free ${card.tableNumber}`
+                                  : `Free ${card.tableNumber}`
+                              }
+                            >
+                              <IndianRupee className="w-3.5 h-3.5" />
+                              <span>Paid</span>
+                            </button>
+                          ) : (
+                            <button
+                              disabled
+                              className="px-3 py-1.5 bg-stone-100 text-stone-400 rounded-xl text-xs font-black flex items-center gap-1 cursor-not-allowed"
+                              title="Nothing to settle — this table has no open bill"
+                            >
+                              <IndianRupee className="w-3.5 h-3.5" />
+                              <span>Paid</span>
+                            </button>
+                          ))}
 
                         {card.tableId && onOpenCustomerMenu && (
                           <button
@@ -847,13 +896,6 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
         tableNumber={selectedTableForBill?.tableNumber || ''}
         orders={selectedTableForBill?.orders || []}
         onUpdateStatus={onUpdateStatus}
-        onCombineOrders={(orderIds) => {
-          if (onCombineOrders) {
-            onCombineOrders(orderIds);
-            setSelectedTableForBill(null);
-            showNotice('Orders successfully combined into single bill!');
-          }
-        }}
       />
 
       {/* Table Day-History Modal */}

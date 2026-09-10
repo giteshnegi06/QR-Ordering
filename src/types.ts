@@ -22,7 +22,10 @@ export interface TableItem {
   code: string; // e.g. "table-05"
   capacity: number;
   status: 'available' | 'occupied' | 'reserved';
-  activeOrderId?: string;
+  // The open bill this table is currently running. Explicitly nullable:
+  // JSON.stringify drops keys whose value is `undefined`, so clearing this
+  // with undefined never reached the server and left a stale pointer behind.
+  activeOrderId?: string | null;
 }
 
 export interface Category {
@@ -113,8 +116,9 @@ export interface Order {
   orderRounds?: number;
   mergedOrderIds?: string[];
   isMerged?: boolean;
-  // Each round (initial order + any items added within the 30-min merge window)
-  // tracks its own prep timer so a new addition never mixes with an older round's countdown.
+  // Each round (the first order, plus anything the table adds before the bill
+  // is settled) tracks its own prep timer so a new addition never mixes with an
+  // older round's countdown.
   rounds?: OrderRound[];
 }
 
