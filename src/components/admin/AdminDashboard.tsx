@@ -401,14 +401,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* Secondary Metrics Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Menu Items Availability */}
-        <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs flex items-center justify-between">
+        <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
               Menu Items Inventory
             </h4>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-lg font-extrabold text-stone-900">
                 {menuItems.length} Total Dishes
               </span>
@@ -425,7 +425,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => onNavigateSection('menu')}
-            className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1"
+            className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 shrink-0 self-start sm:self-auto"
           >
             <span>Manage Menu</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -433,7 +433,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* Quick QR Generator action */}
-        <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs flex items-center justify-between">
+        <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-stone-500 mb-1">
               Table QR System
@@ -448,7 +448,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => onNavigateSection('qrcodes')}
-            className="px-3.5 py-2 bg-stone-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-colors"
+            className="px-3.5 py-2 bg-stone-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-colors shrink-0 self-start sm:self-auto"
           >
             View All QRs
           </button>
