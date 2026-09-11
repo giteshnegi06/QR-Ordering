@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { CafeInfo, MenuItem, Order, TableItem } from '../../types';
 import { MonthRevenueModal } from './MonthRevenueModal';
 import {
@@ -13,7 +13,17 @@ import {
   TrendingDown,
   CalendarRange,
   ArrowRight,
+  Lock,
+  Info,
+  BookmarkPlus,
 } from 'lucide-react';
+
+// "Table 05" -> "T5" for the compact status grid; falls back to the raw
+// number for tables that aren't named with a plain digit (e.g. "Patio A").
+const getTableShortLabel = (tableNumber: string): string => {
+  const match = tableNumber.match(/\d+/);
+  return match ? `T${parseInt(match[0], 10)}` : tableNumber;
+};
 
 interface AdminDashboardProps {
   cafe: CafeInfo;
@@ -22,6 +32,7 @@ interface AdminDashboardProps {
   menuItems: MenuItem[];
   onNavigateSection: (section: string) => void;
   onOpenOrder: (order: Order) => void;
+  onUpdateTable: (id: string, updates: Partial<TableItem>) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -31,8 +42,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   menuItems,
   onNavigateSection,
   onOpenOrder,
+  onUpdateTable,
 }) => {
   const [isMonthBreakdownOpen, setIsMonthBreakdownOpen] = useState(false);
+  const [tableNotice, setTableNotice] = useState<string | null>(null);
+  const tableNoticeTimeoutRef = useRef<number | null>(null);
+  const [reserveMode, setReserveMode] = useState(false);
+
+  const sortedTables = useMemo(
+    () => [...tables].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })),
+    [tables]
+  );
+
+  const showTableNotice = (msg: string) => {
+    setTableNotice(msg);
+    if (tableNoticeTimeoutRef.current) window.clearTimeout(tableNoticeTimeoutRef.current);
+    tableNoticeTimeoutRef.current = window.setTimeout(() => setTableNotice(null), 4000);
+  };
+
+  // Admin can mark an available table occupied (seating a walk-in) or, with
+  // Reserve Mode on, reserved instead (holding it for a booking). A reserved
+  // table has no order attached, so it can freely go back to available —
+  // unlike an occupied table, which is intentionally NOT freeable from here.
+  // A table only becomes available again after its bill is actually settled
+  // (order marked served), so occupied status can't drift out of sync with reality.
+  const handleTableClick = (table: TableItem) => {
+    if (table.status === 'occupied') {
+      showTableNotice(
+        `${table.number} is occupied — it frees up automatically once the order is served and the bill is paid.`
+      );
+      return;
+    }
+
+    if (table.status === 'reserved') {
+      if (reserveMode) {
+        onUpdateTable(table.id, { status: 'available' });
+        showTableNotice(`${table.number} reservation cancelled — back to available.`);
+      } else {
+        onUpdateTable(table.id, { status: 'occupied' });
+      }
+      return;
+    }
+
+    // Available table
+    if (reserveMode) {
+      onUpdateTable(table.id, { status: 'reserved' });
+    } else {
+      onUpdateTable(table.id, { status: 'occupied' });
+    }
+  };
 
   // Metric Calculations
   const metrics = useMemo(() => {
@@ -115,7 +173,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* <div className="flex items-center gap-2">
           <button
             onClick={() => onNavigateSection('kitchen')}
             className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
@@ -129,11 +187,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             Print Table QRs
           </button>
-        </div>
+        </div> */}
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Today's Sales */}
         <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs">
           <div className="flex items-center justify-between text-stone-400 mb-2">
@@ -241,6 +299,107 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
+      {/* Table Status Grid — at-a-glance occupancy, click to seat a walk-in */}
+      <div className="bg-white rounded-3xl border border-stone-200 shadow-2xs p-5 space-y-4">
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center space-y-3">
+          <div>
+            <h3 className="text-base font-bold text-stone-900">Table Status</h3>
+            <p className="text-xs text-stone-500">
+              {reserveMode
+                ? 'Reserve Mode: click an available table to hold it, or a reserved table to release it'
+                : 'Click an available table to seat a walk-in guest'}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setReserveMode((v) => !v)}
+              className={`self-start px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border shrink-0 ${
+                reserveMode
+                  ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
+                  : 'bg-white border-stone-200 text-stone-600 hover:border-purple-300 hover:text-purple-700'
+              }`}
+              title="Toggle Reserve Mode to hold/release tables for bookings"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5" />
+              <span>Reserve Mode {reserveMode ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-bold text-stone-500">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-md bg-emerald-500 shrink-0" />
+                Available
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-md bg-rose-500 shrink-0" />
+                Occupied
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-md bg-purple-500 shrink-0" />
+                Reserved
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {tableNotice && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] font-semibold text-amber-900 flex items-center gap-2 animate-in fade-in">
+            <Lock className="w-3.5 h-3.5 shrink-0" />
+            <span>{tableNotice}</span>
+          </div>
+        )}
+
+        {sortedTables.length === 0 ? (
+          <div className="py-8 text-center text-xs text-stone-400">
+            No tables configured yet. Add tables from the Tables section.
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-12 gap-2">
+            {sortedTables.map((table) => {
+              const isOccupied = table.status === 'occupied';
+              const isReserved = table.status === 'reserved';
+
+              return (
+                <button
+                  key={table.id}
+                  onClick={() => handleTableClick(table)}
+                  title={
+                    isOccupied
+                      ? `${table.number} is occupied — clears automatically when the bill is paid`
+                      : isReserved
+                      ? reserveMode
+                        ? `${table.number} is reserved — click to release it`
+                        : `${table.number} is reserved — click to mark occupied`
+                      : reserveMode
+                      ? `${table.number} is available — click to reserve it`
+                      : `${table.number} is available — click to seat a walk-in`
+                  }
+                  className={`aspect-square rounded-lg borde font-bold text-base tracking-widest flex items-center justify-center transition-all cursor-pointer ${
+                    isOccupied
+                      ? 'bg-rose-500 border-rose-500 text-white shadow-sm'
+                      : isReserved
+                      ? 'bg-purple-500 border-purple-500 text-white hover:bg-purple-600'
+                      : 'bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600'
+                  }`}
+                >
+                  {getTableShortLabel(table.number)}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* <div className="flex items-start gap-1.5 text-[10px] text-stone-400 pt-1">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            Turn on Reserve Mode to hold a table for a booking or release a reservation. Occupied
+            tables can only be cleared by serving the order — this prevents marking a table
+            available while its bill is still unpaid.
+          </span>
+        </div> */}
+      </div>
+
       {/* Secondary Metrics Bar */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Menu Items Availability */}
@@ -295,6 +454,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
         </div>
       </div>
+
 
       {/* Recent Orders List */}
       <div className="bg-white rounded-3xl border border-stone-200 shadow-2xs overflow-hidden">

@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* iOS Safari auto-zooms the page when a focused input's font-size is under
+   16px — nearly every form field here uses a smaller Tailwind text size for
+   density, so force 16px only while actually focused on a touch/mobile
+   viewport (keeps the compact look everywhere else, and on desktop). */
+@media (max-width: 767px) {
+  input:focus,
+  select:focus,
+  textarea:focus {
+    font-size: 16px !important;
+  }
+}
+
 @media print {
   header, nav, aside, .no-print, button {
     display: none !important;

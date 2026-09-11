@@ -107,6 +107,7 @@ export const AdminTables: React.FC<AdminTablesProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {tables.map((table) => {
           const isOccupied = table.status === 'occupied';
+          const isReserved = table.status === 'reserved';
 
           return (
             <div
@@ -114,6 +115,8 @@ export const AdminTables: React.FC<AdminTablesProps> = ({
               className={`bg-white rounded-2xl border p-5 shadow-2xs flex flex-col justify-between transition-all ${
                 isOccupied
                   ? 'border-amber-300 ring-2 ring-amber-100'
+                  : isReserved
+                  ? 'border-purple-300 ring-2 ring-purple-100'
                   : 'border-stone-200 hover:border-stone-300'
               }`}
             >
@@ -127,10 +130,12 @@ export const AdminTables: React.FC<AdminTablesProps> = ({
                     className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                       isOccupied
                         ? 'bg-amber-100 text-amber-800'
+                        : isReserved
+                        ? 'bg-purple-100 text-purple-800'
                         : 'bg-emerald-50 text-emerald-700'
                     }`}
                   >
-                    {isOccupied ? 'Occupied' : 'Available'}
+                    {isOccupied ? 'Occupied' : isReserved ? 'Reserved' : 'Available'}
                   </span>
                 </div>
 

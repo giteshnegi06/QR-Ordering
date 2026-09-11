@@ -170,10 +170,10 @@ export const App: React.FC = () => {
           </div>
 
           {/* QR scan hint */}
-          <div className="hidden sm:flex items-center gap-1.5 text-stone-500 text-[10px]">
+          {/* <div className="hidden sm:flex items-center gap-1.5 text-stone-500 text-[10px]">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
             <span>Customer menu accessible via QR scan only</span>
-          </div>
+          </div> */}
         </div>
       </nav>
 

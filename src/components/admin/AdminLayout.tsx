@@ -87,7 +87,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const navItems: { id: NavSection; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
-    { id: 'kitchen', label: 'Kitchen', icon: ChefHat },
+    // { id: 'kitchen', label: 'Kitchen', icon: ChefHat },
     { id: 'menu', label: 'Menu Items', icon: UtensilsCrossed },
     { id: 'categories', label: 'Categories', icon: FolderTree },
     { id: 'tables', label: 'Tables', icon: TableIcon },
@@ -267,6 +267,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             menuItems={menuItems}
             onNavigateSection={(sec) => handleNavClick(sec as NavSection)}
             onOpenOrder={(order) => setSelectedOrderForModal(order)}
+            onUpdateTable={onUpdateTable}
           />
         )}
 

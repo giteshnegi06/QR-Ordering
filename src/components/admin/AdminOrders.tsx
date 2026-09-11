@@ -404,6 +404,15 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                 // until Paid settles it — so it outlives 'served', unlike
                 // hasActive above, which only tracks food still in the kitchen.
                 const openBill = card.openBill;
+                // A table the admin marked occupied/reserved by hand from the
+                // Dashboard grid (a walk-in or a booking) has no order at all
+                // yet, so hasActive/openBill above miss it entirely — read the
+                // table's own status directly so the board doesn't call it
+                // "Available" while someone is actually sitting there.
+                const isManuallyOccupied =
+                  !hasActive && !openBill && card.tableItem?.status === 'occupied';
+                const isManuallyReserved =
+                  !hasActive && !openBill && card.tableItem?.status === 'reserved';
 
                 const activeItemsCount = card.activeOrders.reduce(
                   (sum, o) => sum + o.items.reduce((s, it) => s + it.quantity, 0),
@@ -422,6 +431,12 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                         ? 'border-emerald-300 ring-1 ring-emerald-100'
                         : hasActive
                         ? 'border-stone-300'
+                        : openBill
+                        ? 'border-yellow-400/50 ring-1 ring-yellow-200/80'
+                        : isManuallyOccupied
+                        ? 'border-rose-300 ring-1 ring-rose-100'
+                        : isManuallyReserved
+                        ? 'border-purple-300 ring-1 ring-purple-100'
                         : 'border-stone-200 opacity-80 hover:opacity-100'
                     }`}
                   >
@@ -472,13 +487,23 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                             <span>•</span>
                             <span
                               className={`font-semibold ${
-                                hasActive ? 'text-amber-800' : 'text-stone-400'
+                                hasActive
+                                  ? 'text-amber-800'
+                                  : isManuallyOccupied
+                                  ? 'text-rose-700'
+                                  : isManuallyReserved
+                                  ? 'text-purple-700'
+                                  : 'text-stone-400'
                               }`}
                             >
                               {hasActive
                                 ? `${card.activeOrders.length} Active Order${
                                     card.activeOrders.length > 1 ? 's' : ''
                                   }`
+                                : isManuallyOccupied
+                                ? 'Occupied • No Order Yet'
+                                : isManuallyReserved
+                                ? 'Reserved'
                                 : 'No Active Orders'}
                             </span>
                           </div>
@@ -536,9 +561,11 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                     {/* Orders Body */}
                     <div className="p-4 flex-1 space-y-3">
                       {card.allOrders.length === 0 ? (
-                        <div className="py-6 text-center text-xs text-stone-400">
-                          Table is available. No orders placed yet.
-                        </div>
+                        isManuallyOccupied || isManuallyReserved ? null : (
+                          <div className="py-6 text-center text-xs text-stone-400">
+                            Table is available. No orders placed yet.
+                          </div>
+                        )
                       ) : (
                         <div className="space-y-2.5">
                           {/* List active orders first, then past orders */}
@@ -666,9 +693,23 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                         <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
                           {openBill ? 'Open Table Bill' : 'Table Status'}
                         </div>
-                        <div className="text-base font-black text-stone-900">
+                        <div
+                          className={`text-base font-black ${
+                            openBill
+                              ? 'text-stone-900'
+                              : isManuallyOccupied
+                              ? 'text-rose-600'
+                              : isManuallyReserved
+                              ? 'text-purple-600'
+                              : 'text-stone-900'
+                          }`}
+                        >
                           {openBill
                             ? `${cafe.currency}${openBill.total.toFixed(2)}`
+                            : isManuallyOccupied
+                            ? 'Occupied'
+                            : isManuallyReserved
+                            ? 'Reserved'
                             : 'Available'}
                         </div>
                       </div>
