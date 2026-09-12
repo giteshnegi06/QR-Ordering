@@ -127,4 +127,5 @@ export interface AdminUser {
   name: string;
   email: string;
   role: 'admin' | 'kitchen' | 'staff';
+  createdAt?: string;
 }

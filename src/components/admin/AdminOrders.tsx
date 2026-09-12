@@ -380,11 +380,37 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
       {/* VIEW 1: TABLE CARDS (Sorted by New Active Orders First) */}
       {viewMode === 'tables' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between text-xs text-stone-500 px-1">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 text-xs text-stone-500 px-1">
             <span>
               Showing <strong>{filteredTableCards.length}</strong> Tables • Available: <strong>{availableTablesCount}</strong> • Occupied: <strong>{occupiedTablesCount}</strong>
             </span>
-            
+
+            {/* Card border color key — the cards below are color-coded by
+                what's happening at that table; this spells out what each
+                color means instead of leaving it to be guessed. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> New Order
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-400" /> Cooking
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> Ready
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" /> Bill Pending
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-400" /> Occupied
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Reserved
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-stone-300 border border-stone-400" /> Available
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -422,22 +448,22 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                 return (
                   <div
                     key={card.tableNumber}
-                    className={`bg-white rounded-3xl border transition-all flex flex-col justify-between overflow-hidden shadow-2xs ${
+                    className={`rounded-3xl border transition-all flex flex-col justify-between overflow-hidden shadow-2xs ${
                       hasNewOrder
-                        ? 'border-amber-400 ring-2 ring-amber-300/80 bg-amber-50/20'
+                        ? 'border-amber-400 ring-2 ring-amber-300/80 bg-amber-50'
                         : hasPreparing
-                        ? 'border-blue-300 ring-1 ring-blue-100'
+                        ? 'border-blue-300 ring-1 ring-blue-100 bg-blue-50/60'
                         : hasReady
-                        ? 'border-emerald-300 ring-1 ring-emerald-100'
+                        ? 'border-emerald-300 ring-1 ring-emerald-100 bg-emerald-50/60'
                         : hasActive
-                        ? 'border-stone-300'
+                        ? 'border-stone-300 bg-stone-50/60'
                         : openBill
-                        ? 'border-yellow-400/50 ring-1 ring-yellow-200/80'
+                        ? 'border-yellow-400/50 ring-1 ring-yellow-200/80 bg-yellow-50/50'
                         : isManuallyOccupied
-                        ? 'border-rose-300 ring-1 ring-rose-100'
+                        ? 'border-rose-300 ring-1 ring-rose-100 bg-rose-50/60'
                         : isManuallyReserved
-                        ? 'border-purple-300 ring-1 ring-purple-100'
-                        : 'border-stone-200 opacity-80 hover:opacity-100'
+                        ? 'border-purple-300 ring-1 ring-purple-100 bg-purple-50/60'
+                        : 'border-stone-200 bg-white opacity-80 hover:opacity-100'
                     }`}
                   >
                     {/* Card Header */}

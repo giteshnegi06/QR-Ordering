@@ -3,6 +3,7 @@ import swaggerUi from 'swagger-ui-express';
 import { query } from './db.js';
 import { swaggerDocument } from './swagger.js';
 import { notifyResourceChanged } from './realtime.js';
+import { hashPassword, verifyPassword } from './auth.js';
 
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
@@ -103,6 +104,17 @@ function mapCategory(row: any) {
     name: row.name,
     icon: row.icon || 'Utensils',
     displayOrder: Number(row.display_order || 0),
+  };
+}
+
+// Helper to map DB admin_users row — password_hash never leaves the server.
+function mapStaff(row: any) {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    createdAt: row.created_at,
   };
 }
 
@@ -269,6 +281,99 @@ apiRouter.delete('/tables/:id', async (req: Request, res: Response) => {
     await query('DELETE FROM tables WHERE id = $1', [req.params.id]);
     notifyResourceChanged('tables');
     res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- STAFF ACCOUNTS (admin_users) ---
+// Kept intentionally simple: the cafe admin adds a name/email/password/role
+// here, and the resulting account can sign in at the staff portal. Every
+// account belongs to the single cafe row (same pattern as tables/menu).
+apiRouter.get('/admin-users', async (req: Request, res: Response) => {
+  try {
+    const result = await query('SELECT * FROM admin_users ORDER BY created_at DESC');
+    res.json(result.rows.map(mapStaff));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/admin-users', async (req: Request, res: Response) => {
+  try {
+    const s = req.body;
+    if (!s || !s.name || !s.email || !s.password) {
+      return res.status(400).json({ error: 'Missing required field: name, email, password' });
+    }
+    const role = s.role === 'admin' ? 'admin' : s.role === 'staff' ? 'staff' : 'kitchen';
+    const cafeId = await getCafeId();
+    const id = `staff-${Date.now()}`;
+    const passwordHash = hashPassword(s.password);
+
+    const result = await query(
+      `INSERT INTO admin_users (id, cafe_id, name, email, role, password_hash)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [id, cafeId, s.name, s.email.toLowerCase().trim(), role, passwordHash]
+    );
+
+    res.json(mapStaff(result.rows[0]));
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/admin-users/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM admin_users WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lets the cafe admin set a new password for a staff account (e.g. they
+// forgot it, or it should be rotated) without needing the old one — the
+// admin console itself is the trusted party here, same as everywhere else
+// this app doesn't yet have admin-session auth of its own.
+apiRouter.patch('/admin-users/:id/password', async (req: Request, res: Response) => {
+  try {
+    const { password } = req.body || {};
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const passwordHash = hashPassword(password);
+    const result = await query(
+      'UPDATE admin_users SET password_hash = $1 WHERE id = $2 RETURNING *',
+      [passwordHash, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Staff account not found' });
+    res.json(mapStaff(result.rows[0]));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verifies a staff login against admin_users. The demo "Cafe Admin" quick
+// sign-in bypasses this entirely (no account needed for the owner), but any
+// staff account created here must present the real password to get in.
+apiRouter.post('/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Missing email or password' });
+    }
+    const result = await query('SELECT * FROM admin_users WHERE email = $1', [
+      String(email).toLowerCase().trim(),
+    ]);
+    const row = result.rows[0];
+    if (!row || !row.password_hash || !verifyPassword(password, row.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    res.json(mapStaff(row));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -7,6 +7,7 @@ import { AdminCategories } from './AdminCategories';
 import { AdminTables } from './AdminTables';
 import { AdminQRCodes } from './AdminQRCodes';
 import { AdminSettings } from './AdminSettings';
+import { AdminStaff } from './AdminStaff';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { storageService } from '../../services/storage';
 import {
@@ -23,6 +24,7 @@ import {
   Menu,
   X,
   Store,
+  Users,
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -56,6 +58,7 @@ type NavSection =
   | 'categories'
   | 'tables'
   | 'qrcodes'
+  | 'staff'
   | 'settings';
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({
@@ -92,6 +95,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     { id: 'categories', label: 'Categories', icon: FolderTree },
     { id: 'tables', label: 'Tables', icon: TableIcon },
     { id: 'qrcodes', label: 'QR Codes', icon: QrCode },
+    { id: 'staff', label: 'Staff', icon: Users },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -325,6 +329,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             onOpenCustomerMenu={onOpenCustomerMenu}
           />
         )}
+
+        {activeSection === 'staff' && <AdminStaff />}
 
         {activeSection === 'settings' && (
           <AdminSettings cafe={cafe} onUpdateCafe={onUpdateCafe} />

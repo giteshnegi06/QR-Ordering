@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { CafeInfo, Order, OrderStatus } from '../../types';
 import { Modal } from '../common/Modal';
 import { VegBadge } from '../common/VegBadge';
@@ -19,11 +20,15 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
   cafe,
   onUpdateStatus,
 }) => {
-  if (!order) return null;
+  // Hooks must run every render regardless of `order` — the early return
+  // below only guards what gets rendered, not these declarations.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handlePrintReceipt = useReactToPrint({
+    contentRef,
+    documentTitle: `Order-${order?.id ?? ''}`,
+  });
 
-  const handlePrintReceipt = () => {
-    window.print();
-  };
+  if (!order) return null;
 
   return (
     <Modal
@@ -39,7 +44,21 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
       }
       maxWidth="lg"
     >
-      <div className="space-y-5" id="printable-order-receipt">
+      <div ref={contentRef} className="relative overflow-hidden space-y-5" id="printable-order-receipt">
+        {/* Faint cafe logo watermark behind the receipt content. An <img> is
+            used instead of a CSS background-image because most browsers omit
+            background-images when printing unless "background graphics" is
+            manually enabled — a plain <img> always prints. */}
+        {cafe.logo && (
+          <img
+            src={cafe.logo}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none select-none absolute inset-0 m-auto w-56 h-56 object-contain opacity-[0.06] z-0"
+          />
+        )}
+
+        <div className="relative z-10 space-y-5">
         {/* Header summary */}
         <div className="p-4 bg-stone-50 border border-stone-100 rounded-2xl flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -65,7 +84,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handlePrintReceipt}
+              onClick={() => handlePrintReceipt()}
               className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Print Bill Receipt"
             >
@@ -89,7 +108,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
             </span>
 
             <button
-              onClick={handlePrintReceipt}
+              onClick={() => handlePrintReceipt()}
               className="p-2 bg-white hover:bg-stone-100 border border-stone-200 rounded-xl text-stone-600 transition-colors"
               title="Print Receipt"
             >
@@ -191,7 +210,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
         </div>
 
         {/* Status Change Controls */}
-        <div className="pt-2 border-t border-stone-100">
+        <div className="no-print pt-2 border-t border-stone-100">
           <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2">
             Change Order Status
           </label>
@@ -212,6 +231,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
               )
             )}
           </div>
+        </div>
         </div>
       </div>
     </Modal>

@@ -1,26 +1,57 @@
 import React, { useState } from 'react';
 import { CafeInfo } from '../../types';
-import { Lock, Mail, ShieldCheck, ArrowRight, Sparkles } from 'lucide-react';
+import { staffService } from '../../services/staff';
+import { Lock, Mail, ShieldCheck, ArrowRight, Sparkles, Loader2 } from 'lucide-react';
 
 interface AdminLoginProps {
   cafe: CafeInfo;
   onLoginSuccess: (email: string, role: 'admin' | 'kitchen') => void;
 }
 
+// The cafe owner's own instant demo access never needed a real account row —
+// any staff account created from the Staff Accounts screen, though, must
+// verify against the server so a removed/wrong password actually locks
+// someone out.
+const DEMO_ADMIN_EMAIL = 'admin@negiskitchen.com';
+const DEMO_ADMIN_PASSWORD = 'admin123';
+
 export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) => {
   const [email, setEmail] = useState('admin@negiskitchen.com');
   const [password, setPassword] = useState('admin123');
   const [role, setRole] = useState<'admin' | 'kitchen'>('admin');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) {
+    setErrorMsg(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password.trim()) {
       setErrorMsg('Please enter email and password');
       return;
     }
-    // Demo authentication check
-    onLoginSuccess(email.trim(), role);
+
+    if (
+      role === 'admin' &&
+      trimmedEmail.toLowerCase() === DEMO_ADMIN_EMAIL &&
+      password === DEMO_ADMIN_PASSWORD
+    ) {
+      onLoginSuccess(trimmedEmail, 'admin');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const account = await staffService.login(trimmedEmail, password);
+      // Only two portals exist client-side; a 'staff' role account still
+      // lands in the Kitchen KDS rather than the full admin console.
+      onLoginSuccess(account.email, account.role === 'admin' ? 'admin' : 'kitchen');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Invalid email or password');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleQuickDemoAdmin = () => {
@@ -93,7 +124,16 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRole('kitchen')}
+                  onClick={() => {
+                    setRole('kitchen');
+                    // The demo admin credentials are pre-filled by default and
+                    // won't match any real staff account — clear them so a
+                    // kitchen worker isn't confused by a guaranteed failure.
+                    if (email === DEMO_ADMIN_EMAIL && password === DEMO_ADMIN_PASSWORD) {
+                      setEmail('');
+                      setPassword('');
+                    }
+                  }}
                   className={`py-2 px-3 rounded-xl font-bold border transition-colors ${
                     role === 'kitchen'
                       ? 'bg-stone-900 text-white border-stone-900 shadow-xs'
@@ -103,6 +143,11 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
                   Kitchen Staff
                 </button>
               </div>
+              {role === 'kitchen' && (
+                <p className="text-[11px] text-stone-400 mt-1.5">
+                  Kitchen logins are created by the cafe admin under Staff Accounts.
+                </p>
+              )}
             </div>
 
             <div>
@@ -139,9 +184,11 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
 
             <button
               type="submit"
-              className="w-full py-3 px-4 bg-stone-900 hover:bg-black text-white rounded-xl font-bold text-xs shadow-md transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              className="w-full py-3 px-4 bg-stone-900 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-1.5"
             >
-              Sign In to Management
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>{isSubmitting ? 'Signing In...' : 'Sign In to Management'}</span>
             </button>
           </form>
 

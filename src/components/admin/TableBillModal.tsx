@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { CafeInfo, Order, OrderStatus } from '../../types';
 import { Modal } from '../common/Modal';
 import { VegBadge } from '../common/VegBadge';
@@ -21,11 +22,15 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
   orders,
   onUpdateStatus,
 }) => {
-  if (!isOpen || orders.length === 0) return null;
+  // Hooks must run every render regardless of isOpen/orders — the early
+  // return below only guards what gets rendered, not these declarations.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    contentRef,
+    documentTitle: `Bill-${tableNumber}`,
+  });
 
-  const handlePrint = () => {
-    window.print();
-  };
+  if (!isOpen || orders.length === 0) return null;
 
   // Consolidate all items across all orders for this table
   const consolidatedItems = orders.flatMap((o) => o.items);
@@ -75,7 +80,7 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handlePrint}
+              onClick={() => handlePrint()}
               className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
@@ -86,9 +91,24 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
 
         {/* The Printable Bill Document */}
         <div
+          ref={contentRef}
           id="printable-single-bill"
-          className="bg-white border-2 border-stone-200 rounded-2xl p-6 sm:p-8 font-mono text-stone-900 space-y-4 shadow-xs"
+          className="relative overflow-hidden bg-white border-2 border-stone-200 rounded-2xl p-6 sm:p-8 font-mono text-stone-900 shadow-xs"
         >
+          {/* Faint cafe logo watermark behind the receipt content. An <img>
+              is used instead of a CSS background-image because most browsers
+              omit background-images when printing unless "background
+              graphics" is manually enabled — a plain <img> always prints. */}
+          {cafe.logo && (
+            <img
+              src={cafe.logo}
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none select-none absolute inset-0 m-auto w-56 h-56 object-contain opacity-[0.07] z-0"
+            />
+          )}
+
+          <div className="relative z-10 space-y-4">
           {/* Header */}
           <div className="text-center pb-4 border-b-2 border-dashed border-stone-300 space-y-1">
             <h2 className="text-xl font-black uppercase tracking-wider font-sans text-stone-950">
@@ -232,6 +252,7 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
               Printed on {new Date().toLocaleString()} • {tableNumber} Single Bill
             </p>
           </div>
+          </div>
         </div>
 
         {/* Modal Bottom Actions */}
@@ -261,7 +282,7 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
 
             <button
               type="button"
-              onClick={handlePrint}
+              onClick={() => handlePrint()}
               className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-4 h-4" />

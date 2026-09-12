@@ -12,8 +12,17 @@
   }
 }
 
+/* Printing (Print Bill / Table Stand / Order Receipt) goes through
+   react-to-print, which clones only the targeted receipt element into an
+   isolated iframe and prints that — so there's no surrounding page chrome
+   to hide here. This just tidies up whatever ends up inside that clone:
+   any leftover interactive buttons disappear, and the receipt sits in
+   normal flow instead of being forced into `position: absolute` (which
+   previously collapsed the printed page to blank, since an iframe's body
+   sizes to its normal-flow content). */
 @media print {
-  header, nav, aside, .no-print, button {
+  .no-print,
+  button {
     display: none !important;
   }
 
@@ -27,16 +36,10 @@
   #printable-single-bill,
   #printable-table-card,
   #printable-order-receipt {
-    display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important;
-    max-width: 420px !important;
-    margin: 0 auto !important;
+    max-width: 420px;
+    margin: 0 auto;
     border: none !important;
     box-shadow: none !important;
     padding: 12px !important;
-    page-break-inside: avoid;
   }
 }

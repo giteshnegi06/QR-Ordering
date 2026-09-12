@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { CafeInfo, TableItem } from '../../types';
 import { Modal } from '../common/Modal';
 import { Printer, Download, ExternalLink, QrCode } from 'lucide-react';
@@ -21,11 +22,15 @@ export const TablePrintModal: React.FC<TablePrintModalProps> = ({
   onClose,
   onTestTableMenu,
 }) => {
-  if (!table) return null;
+  // Hooks must run every render regardless of `table` — the early return
+  // below only guards what gets rendered, not these declarations.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    contentRef,
+    documentTitle: `Table-Stand-${table?.number ?? ''}`,
+  });
 
-  const handlePrint = () => {
-    window.print();
-  };
+  if (!table) return null;
 
   const handleDownload = () => {
     downloadTableQRCode(cafe.name, table.number, qrDataUrl);
@@ -46,6 +51,7 @@ export const TablePrintModal: React.FC<TablePrintModalProps> = ({
       <div className="space-y-5">
         {/* Printable Card Frame */}
         <div
+          ref={contentRef}
           id="printable-table-card"
           className="p-6 bg-white border-2 border-stone-200 rounded-3xl text-center space-y-4 shadow-sm"
         >
@@ -100,7 +106,7 @@ export const TablePrintModal: React.FC<TablePrintModalProps> = ({
           </button>
 
           <button
-            onClick={handlePrint}
+            onClick={() => handlePrint()}
             className="py-2.5 px-3 bg-stone-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Printer className="w-4 h-4" />

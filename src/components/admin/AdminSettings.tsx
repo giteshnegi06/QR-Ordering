@@ -102,20 +102,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
 
           <div>
             <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
-              Tagline / Subtitle
-            </label>
-            <input
-              type="text"
-              value={formData.tagline}
-              onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
               Phone / Support Number
             </label>
             <input
@@ -125,18 +111,18 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
               className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
             />
           </div>
+        </div>
 
-          <div>
-            <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
-              Currency Symbol
-            </label>
-            <input
-              type="text"
-              value={formData.currency}
-              onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500 font-bold"
-            />
-          </div>
+        <div>
+          <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+            Tagline / Subtitle
+          </label>
+          <input
+            type="text"
+            value={formData.tagline}
+            onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
+            className="w-full px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
+          />
         </div>
 
         <div>
