@@ -33,7 +33,7 @@ function getPusher(): Pusher | null {
   return _pusher;
 }
 
-export type RealtimeResource = 'orders' | 'tables' | 'categories' | 'menu' | 'cafe';
+export type RealtimeResource = 'orders' | 'tables' | 'categories' | 'menu' | 'cafe' | 'table-requests';
 
 export function notifyResourceChanged(resource: RealtimeResource): void {
   const pusher = getPusher();

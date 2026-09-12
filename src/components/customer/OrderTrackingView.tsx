@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Order, OrderRound, CafeInfo } from '../../types';
+import { Order, OrderRound, CafeInfo, TableItem } from '../../types';
 import { VegBadge } from '../common/VegBadge';
+import { tableRequestService } from '../../services/tableRequests';
 import {
   CheckCircle2,
   Clock,
@@ -9,8 +10,9 @@ import {
   Utensils,
   ArrowLeft,
   MapPin,
-  HelpCircle,
   Check,
+  Droplets,
+  Loader2,
   Timer,
   Flame,
   Plus,
@@ -26,6 +28,7 @@ interface OrderTrackingViewProps {
   selectedOrderId?: string;
   onSelectOrder?: (orderId: string) => void;
   cafe: CafeInfo;
+  table: TableItem;
   onBackToMenu: () => void;
   currency: string;
 }
@@ -603,10 +606,12 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
   selectedOrderId,
   onSelectOrder,
   cafe,
+  table,
   onBackToMenu,
   currency,
 }) => {
-  const [assistanceMsg, setAssistanceMsg] = useState<string | null>(null);
+  const [assistanceMsg, setAssistanceMsg] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
+  const [pendingRequest, setPendingRequest] = useState<'water' | 'server' | null>(null);
   const [now, setNow] = useState<number>(Date.now());
 
   // Aggregate orders list
@@ -652,10 +657,31 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  const handleCallStaff = (requestType: string) => {
-    const tableNo = allOrdersList[0]?.tableNumber || 'your table';
-    setAssistanceMsg(`Staff alerted: "${requestType}" for ${tableNo}`);
-    setTimeout(() => setAssistanceMsg(null), 4000);
+  // Sends the request to the server, where it shows up on the Kitchen KDS,
+  // Admin dashboard and Orders board until staff mark it done. If this table
+  // already has the same request open, the server hands that one back
+  // instead of paging the staff a second time.
+  const handleCallStaff = async (type: 'water' | 'server') => {
+    if (pendingRequest) return;
+    setPendingRequest(type);
+    const label = type === 'water' ? 'water' : 'a server';
+    try {
+      const { duplicate } = await tableRequestService.create(table.id, table.number, type);
+      setAssistanceMsg({
+        tone: 'ok',
+        text: duplicate
+          ? `Staff have already been asked for ${label} — they're on their way to ${table.number}.`
+          : `Staff alerted — ${label} is on the way to ${table.number}.`,
+      });
+    } catch {
+      setAssistanceMsg({
+        tone: 'error',
+        text: 'Could not reach the staff right now. Please try again or ask at the counter.',
+      });
+    } finally {
+      setPendingRequest(null);
+      setTimeout(() => setAssistanceMsg(null), 5000);
+    }
   };
 
   const tableNumber = allOrdersList[0]?.tableNumber || 'Your Table';
@@ -697,9 +723,15 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
         {/* Assistance Message Alert */}
         {assistanceMsg && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-2xl text-center shadow-xs flex items-center justify-center gap-2 animate-in fade-in">
-            <Check className="w-4 h-4 text-emerald-600" />
-            <span>{assistanceMsg}</span>
+          <div
+            className={`p-4 border text-xs font-bold rounded-2xl text-center shadow-xs flex items-center justify-center gap-2 animate-in fade-in ${
+              assistanceMsg.tone === 'ok'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-rose-50 border-rose-200 text-rose-800'
+            }`}
+          >
+            <Check className={`w-4 h-4 ${assistanceMsg.tone === 'ok' ? 'text-emerald-600' : 'text-rose-600'}`} />
+            <span>{assistanceMsg.text}</span>
           </div>
         )}
 
@@ -996,18 +1028,28 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
         {/* Quick Table Actions */}
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => handleCallStaff('Request Water')}
-            className="py-3 px-4 bg-white hover:bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-700 shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={() => handleCallStaff('water')}
+            disabled={pendingRequest !== null}
+            className="py-3 px-4 bg-white hover:bg-stone-50 disabled:opacity-60 disabled:cursor-wait border border-stone-200 rounded-2xl text-xs font-bold text-stone-700 shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
-            <HelpCircle className="w-4 h-4 text-stone-400" />
+            {pendingRequest === 'water' ? (
+              <Loader2 className="w-4 h-4 text-sky-500 animate-spin" />
+            ) : (
+              <Droplets className="w-4 h-4 text-sky-500" />
+            )}
             <span>Need Water</span>
           </button>
 
           <button
-            onClick={() => handleCallStaff('Call Server / Waiter')}
-            className="py-3 px-4 bg-white hover:bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-700 shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={() => handleCallStaff('server')}
+            disabled={pendingRequest !== null}
+            className="py-3 px-4 bg-white hover:bg-stone-50 disabled:opacity-60 disabled:cursor-wait border border-stone-200 rounded-2xl text-xs font-bold text-stone-700 shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
-            <BellRing className="w-4 h-4 text-amber-600" />
+            {pendingRequest === 'server' ? (
+              <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
+            ) : (
+              <BellRing className="w-4 h-4 text-amber-600" />
+            )}
             <span>Call Server</span>
           </button>
         </div>

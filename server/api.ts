@@ -424,6 +424,85 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   }
 });
 
+// --- TABLE REQUESTS (Need Water / Call Server) ---
+// A real notification staff can see and clear — previously these buttons on
+// the customer tracking page only showed the customer their own toast and
+// never reached anyone.
+function mapTableRequest(row: any) {
+  return {
+    id: row.id,
+    tableId: row.table_id,
+    tableNumber: row.table_number,
+    type: row.type,
+    status: row.status,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at || undefined,
+  };
+}
+
+apiRouter.get('/table-requests', async (req: Request, res: Response) => {
+  try {
+    // Pending ones oldest-first (handle the table that's been waiting
+    // longest first); a short tail of recently resolved ones for context.
+    const result = await query(
+      `SELECT * FROM table_requests
+       WHERE status = 'pending' OR resolved_at > now() - interval '10 minutes'
+       ORDER BY (status = 'pending') DESC, created_at ASC`
+    );
+    res.json(result.rows.map(mapTableRequest));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/table-requests', async (req: Request, res: Response) => {
+  try {
+    const { tableId, tableNumber, type } = req.body || {};
+    if (!tableId || !tableNumber || (type !== 'water' && type !== 'server')) {
+      return res.status(400).json({ error: 'Missing or invalid tableId/tableNumber/type' });
+    }
+    const cafeId = await getCafeId();
+
+    // A table tapping the same button twice shouldn't page the staff twice.
+    // While one request of that kind is still open, hand it back unchanged.
+    const existing = await query(
+      `SELECT * FROM table_requests
+       WHERE cafe_id = $1 AND table_id = $2 AND type = $3 AND status = 'pending'
+       LIMIT 1`,
+      [cafeId, tableId, type]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ ...mapTableRequest(existing.rows[0]), duplicate: true });
+    }
+
+    const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const result = await query(
+      `INSERT INTO table_requests (id, cafe_id, table_id, table_number, type)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [id, cafeId, tableId, tableNumber, type]
+    );
+    notifyResourceChanged('table-requests');
+    res.json(mapTableRequest(result.rows[0]));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.patch('/table-requests/:id/resolve', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `UPDATE table_requests SET status = 'resolved', resolved_at = now() WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+    notifyResourceChanged('table-requests');
+    res.json(mapTableRequest(result.rows[0]));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- CATEGORIES ---
 apiRouter.get('/categories', async (req: Request, res: Response) => {
   try {

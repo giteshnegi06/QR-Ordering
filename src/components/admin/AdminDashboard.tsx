@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { CafeInfo, MenuItem, Order, TableItem } from '../../types';
 import { MonthRevenueModal } from './MonthRevenueModal';
+import { TableRequestsBanner } from '../common/TableRequestsBanner';
 import {
   DollarSign,
   ShoppingBag,
@@ -298,6 +299,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Tables asking for water / a server */}
+      <TableRequestsBanner theme="light" />
 
       {/* Table Status Grid — at-a-glance occupancy, click to seat a walk-in */}
       <div className="bg-white rounded-3xl border border-stone-200 shadow-2xs p-5 space-y-4">

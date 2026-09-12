@@ -348,6 +348,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
         selectedOrderId={selectedOrderId || activeOrdersForTable[0]?.id || allOrdersForTable[0]?.id}
         onSelectOrder={(id) => setSelectedOrderId(id)}
         cafe={cafe}
+        table={currentTable}
         onBackToMenu={() => setIsViewingTracking(false)}
         currency={cafe.currency}
       />

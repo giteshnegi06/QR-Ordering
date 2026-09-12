@@ -9,7 +9,7 @@
 
 import Pusher from 'pusher-js';
 
-export type RealtimeResource = 'orders' | 'tables' | 'categories' | 'menu' | 'cafe';
+export type RealtimeResource = 'orders' | 'tables' | 'categories' | 'menu' | 'cafe' | 'table-requests';
 
 const CHANNEL = 'qr-ordering';
 

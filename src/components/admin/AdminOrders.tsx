@@ -24,6 +24,7 @@ import {
   IndianRupee,
 } from 'lucide-react';
 import { VegBadge } from '../common/VegBadge';
+import { TableRequestsBanner } from '../common/TableRequestsBanner';
 import { useTodayStart } from '../../hooks/useTodayStart';
 
 // One table's row on the board: the table itself plus the orders grouped
@@ -327,6 +328,8 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
           </div>
         </div>
       </div>
+
+      <TableRequestsBanner />
 
       {/* Action Notice Toast */}
       {actionNotice && (
