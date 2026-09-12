@@ -26,9 +26,20 @@ export interface NewStaffInput {
   role: 'kitchen' | 'staff';
 }
 
+// The cafe owner's own instant demo access — shared between AdminLogin (which
+// bypasses the server entirely for these exact values) and AdminSettings
+// (which shows this as the account email when letting the owner set a real
+// password on top of that demo door).
+export const DEMO_ADMIN_EMAIL = 'admin@negiskitchen.com';
+export const DEMO_ADMIN_PASSWORD = 'admin123';
+
 export const staffService = {
-  list(): Promise<AdminUser[]> {
-    return request<AdminUser[]>('/admin-users');
+  // Only kitchen/staff accounts belong on the Staff screen — the owner's own
+  // admin account (if one has been created via setOwnerPassword) is managed
+  // from Settings instead, never listed or resettable here.
+  async list(): Promise<AdminUser[]> {
+    const all = await request<AdminUser[]>('/admin-users');
+    return all.filter((u) => u.role !== 'admin');
   },
 
   add(input: NewStaffInput): Promise<AdminUser> {
@@ -52,6 +63,15 @@ export const staffService = {
   login(email: string, password: string): Promise<AdminUser> {
     return request<AdminUser>('/auth/login', {
       method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  // Sets/rotates the owner's own admin password (Settings screen). Distinct
+  // from resetPassword above, which targets a specific staff id.
+  setOwnerPassword(email: string, password: string): Promise<AdminUser> {
+    return request<AdminUser>('/admin-users/owner-password', {
+      method: 'PUT',
       body: JSON.stringify({ email, password }),
     });
   },

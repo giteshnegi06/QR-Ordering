@@ -357,6 +357,51 @@ apiRouter.patch('/admin-users/:id/password', async (req: Request, res: Response)
   }
 });
 
+// Sets/rotates the cafe owner's own admin password from the Settings screen
+// — distinct from /admin-users/:id/password, which resets a *staff* member's
+// password from the Staff screen. There is exactly one 'admin'-role row per
+// cafe, upserted here rather than requiring the caller to know its id.
+// Note: the "One-Click Sign In as Cafe Admin" demo button on the login
+// screen still bypasses this entirely, by design — it's the always-available
+// instant-access door, independent of whatever real password is set here.
+apiRouter.put('/admin-users/owner-password', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password || String(password).length < 6) {
+      return res.status(400).json({ error: 'Email and a password of at least 6 characters are required' });
+    }
+    const cafeId = await getCafeId();
+    const passwordHash = hashPassword(password);
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    const existing = await query(
+      "SELECT id FROM admin_users WHERE role = 'admin' AND cafe_id = $1 LIMIT 1",
+      [cafeId]
+    );
+
+    let result;
+    if (existing.rows.length > 0) {
+      result = await query(
+        `UPDATE admin_users SET email = $1, password_hash = $2 WHERE id = $3 RETURNING *`,
+        [normalizedEmail, passwordHash, existing.rows[0].id]
+      );
+    } else {
+      result = await query(
+        `INSERT INTO admin_users (id, cafe_id, name, email, role, password_hash)
+         VALUES ($1, $2, $3, $4, 'admin', $5)
+         RETURNING *`,
+        ['admin-owner', cafeId, 'Cafe Admin', normalizedEmail, passwordHash]
+      );
+    }
+    res.json(mapStaff(result.rows[0]));
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Another account already uses this email' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Verifies a staff login against admin_users. The demo "Cafe Admin" quick
 // sign-in bypasses this entirely (no account needed for the owner), but any
 // staff account created here must present the real password to get in.

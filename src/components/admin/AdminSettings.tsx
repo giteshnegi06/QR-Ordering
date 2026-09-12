@@ -1,7 +1,21 @@
 import React, { useState, useRef } from 'react';
 import { CafeInfo } from '../../types';
-import { Save, RotateCcw, ShieldCheck, Store, Percent, Phone, MapPin, Sparkles, Image as ImageIcon, Upload } from 'lucide-react';
-import { storageService } from '../../services/storage';
+import {
+  Save,
+  ShieldCheck,
+  Store,
+  Percent,
+  Phone,
+  MapPin,
+  Sparkles,
+  Image as ImageIcon,
+  Upload,
+  KeyRound,
+  Loader2,
+  Mail,
+  Lock,
+} from 'lucide-react';
+import { staffService, DEMO_ADMIN_EMAIL } from '../../services/staff';
 
 // Keep uploaded cafe images reasonably small — they're fetched on every
 // cafe-info poll across every device, so an unbounded upload would bloat
@@ -18,6 +32,41 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Admin's own login — kept separate from the cafe profile form above and
+  // from the Staff screen: this is the owner's account, not a staff member's.
+  const [adminEmail, setAdminEmail] = useState(DEMO_ADMIN_EMAIL);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminPasswordError, setAdminPasswordError] = useState<string | null>(null);
+  const [adminPasswordSuccess, setAdminPasswordSuccess] = useState(false);
+  const [isSavingAdminPassword, setIsSavingAdminPassword] = useState(false);
+
+  const handleSaveAdminPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPasswordError(null);
+    setAdminPasswordSuccess(false);
+
+    if (!adminEmail.trim()) {
+      setAdminPasswordError('Please enter an email address.');
+      return;
+    }
+    if (adminPassword.length < 6) {
+      setAdminPasswordError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setIsSavingAdminPassword(true);
+    try {
+      await staffService.setOwnerPassword(adminEmail.trim(), adminPassword);
+      setAdminPassword('');
+      setAdminPasswordSuccess(true);
+      setTimeout(() => setAdminPasswordSuccess(false), 3000);
+    } catch (err: any) {
+      setAdminPasswordError(err.message || 'Could not update admin password');
+    } finally {
+      setIsSavingAdminPassword(false);
+    }
+  };
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -50,18 +99,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
     });
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
-  };
-
-  const handleReset = () => {
-    if (
-      window.confirm(
-        'Reset all cafe data, tables, menu, and sample orders to initial demo state? This will reset local storage.'
-      )
-    ) {
-      storageService.resetToDemo();
-      setFormData(storageService.getCafe());
-      alert('Demo data restored successfully.');
-    }
   };
 
   return (
@@ -250,16 +287,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
         </div>
 
         {/* Actions */}
-        <div className="pt-5 border-t border-stone-100 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="px-4 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset to Demo Data</span>
-          </button>
-
+        <div className="pt-5 border-t border-stone-100 flex items-center justify-end">
           <button
             type="submit"
             className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -269,6 +297,81 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ cafe, onUpdateCafe
           </button>
         </div>
       </form>
+
+      {/* Admin Password — the owner's own login, kept separate from the Staff
+          screen (which only manages kitchen/staff accounts). */}
+      <div className="bg-white rounded-3xl border border-stone-200 p-6 shadow-2xs space-y-4 text-xs">
+        <div className="flex items-center gap-2 pb-3 border-b border-stone-100">
+          <KeyRound className="w-4 h-4 text-amber-600" />
+          <h3 className="font-bold text-stone-900 text-sm">Admin Password</h3>
+        </div>
+
+        <p className="text-[11px] text-stone-500">
+          Set or change the password for your own Cafe Admin login. The "One-Click Sign In as Cafe
+          Admin" demo button on the login screen stays available regardless, as an always-on
+          instant-access shortcut.
+        </p>
+
+        {adminPasswordSuccess && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>Admin password updated.</span>
+          </div>
+        )}
+        {adminPasswordError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold rounded-xl">
+            {adminPasswordError}
+          </div>
+        )}
+
+        <form onSubmit={handleSaveAdminPassword} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                Admin Email
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full pl-9 pr-3 py-2.5 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSavingAdminPassword}
+            className="px-5 py-2.5 bg-stone-900 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            {isSavingAdminPassword ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <KeyRound className="w-4 h-4" />
+            )}
+            <span>{isSavingAdminPassword ? 'Saving...' : 'Update Admin Password'}</span>
+          </button>
+        </form>
+      </div>
     </div>
   );
 };

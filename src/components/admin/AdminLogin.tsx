@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CafeInfo } from '../../types';
-import { staffService } from '../../services/staff';
+import { staffService, DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD } from '../../services/staff';
 import { Lock, Mail, ShieldCheck, ArrowRight, Sparkles, Loader2 } from 'lucide-react';
 
 interface AdminLoginProps {
@@ -12,8 +12,6 @@ interface AdminLoginProps {
 // any staff account created from the Staff Accounts screen, though, must
 // verify against the server so a removed/wrong password actually locks
 // someone out.
-const DEMO_ADMIN_EMAIL = 'admin@negiskitchen.com';
-const DEMO_ADMIN_PASSWORD = 'admin123';
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) => {
   const [email, setEmail] = useState('admin@negiskitchen.com');
