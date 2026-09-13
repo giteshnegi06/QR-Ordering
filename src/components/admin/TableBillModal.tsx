@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { CafeInfo, Order, OrderStatus } from '../../types';
+import { CafeInfo, Order } from '../../types';
 import { Modal } from '../common/Modal';
 import { VegBadge } from '../common/VegBadge';
 import { Printer, CheckCircle2, Clock, User, Phone, Receipt } from 'lucide-react';
@@ -11,7 +11,9 @@ interface TableBillModalProps {
   cafe: CafeInfo;
   tableNumber: string;
   orders: Order[];
-  onUpdateStatus?: (orderId: string, status: OrderStatus) => void;
+  // Settles the bill: marks it paid and frees the table. Only offered while
+  // the bill is still open (not for reprints of past receipts).
+  onMarkPaid?: () => void;
 }
 
 export const TableBillModal: React.FC<TableBillModalProps> = ({
@@ -20,7 +22,7 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
   cafe,
   tableNumber,
   orders,
-  onUpdateStatus,
+  onMarkPaid,
 }) => {
   // Hooks must run every render regardless of isOpen/orders — the early
   // return below only guards what gets rendered, not these declarations.
@@ -64,6 +66,42 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
         </div>
       }
       maxWidth="lg"
+      footer={
+        <div className="no-print flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 border border-stone-200 text-stone-600 hover:bg-stone-50 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+
+          <div className="flex items-center gap-2">
+            {onMarkPaid && (
+              <button
+                type="button"
+                onClick={() => {
+                  onMarkPaid();
+                  onClose();
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Mark as Paid</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => handlePrint()}
+              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print Bill</span>
+            </button>
+          </div>
+        </div>
+      }
     >
       <div className="space-y-4">
         {/* Actions Header (Not printed) */}
@@ -252,42 +290,6 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
               Printed on {new Date().toLocaleString()} • {tableNumber} Single Bill
             </p>
           </div>
-          </div>
-        </div>
-
-        {/* Modal Bottom Actions */}
-        <div className="no-print pt-2 flex flex-wrap items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 border border-stone-200 text-stone-600 hover:bg-stone-50 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-          >
-            Close
-          </button>
-
-          <div className="flex items-center gap-2">
-            {onUpdateStatus && (
-              <button
-                type="button"
-                onClick={() => {
-                  orders.forEach((o) => onUpdateStatus(o.id, 'served'));
-                  onClose();
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Mark All as Served</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => handlePrint()}
-              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Print Bill</span>
-            </button>
           </div>
         </div>
       </div>

@@ -7,6 +7,14 @@ interface ModalProps {
   title?: React.ReactNode;
   children: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  // Rendered below the scrolling body, so action buttons stay put however
+  // tall the content gets (a long bill, a big order).
+  footer?: React.ReactNode;
+  // By default the whole body scrolls. Pass false when the content manages
+  // its own scrolling (e.g. only a list in the middle should scroll while
+  // things above it stay pinned) — the body then becomes a flex column that
+  // simply fills the space.
+  scrollBody?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -15,6 +23,8 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   maxWidth = 'md',
+  footer,
+  scrollBody = true,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -47,12 +57,14 @@ export const Modal: React.FC<ModalProps> = ({
         onClick={onClose}
         aria-hidden="true"
       />
+      {/* The panel is capped at the viewport height and only its body
+          scrolls — the title bar and footer stay pinned. */}
       <div
-        className={`relative w-full ${maxWidthClass} bg-white rounded-2xl shadow-2xl border border-stone-100 overflow-hidden z-10 my-auto`}
+        className={`relative w-full ${maxWidthClass} max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] flex flex-col bg-white rounded-2xl shadow-2xl border border-stone-100 overflow-hidden z-10 my-auto`}
         role="dialog"
       >
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100 bg-stone-50/70">
+          <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-stone-100 bg-stone-50/70">
             <h3 className="text-lg font-bold text-stone-900">{title}</h3>
             <button
               onClick={onClose}
@@ -63,7 +75,16 @@ export const Modal: React.FC<ModalProps> = ({
             </button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div
+          className={`p-6 flex-1 min-h-0 ${
+            scrollBody ? 'overflow-y-auto no-scrollbar' : 'flex flex-col overflow-hidden'
+          }`}
+        >
+          {children}
+        </div>
+        {footer && (
+          <div className="shrink-0 px-6 py-4 border-t border-stone-100 bg-white">{footer}</div>
+        )}
       </div>
     </div>
   );

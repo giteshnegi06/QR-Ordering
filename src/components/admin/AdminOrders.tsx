@@ -561,11 +561,11 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                                 orders: [card.allOrders[0]],
                               })
                             }
-                            className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                            title="Print Past Receipt"
+                            className="px-2.5 py-1 gap-1 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                            title="Print Receipt"
                           >
-                            <Printer className="w-3 h-3" />
-                            <span>Past Bill</span>
+                            <Printer className="w-4 h-4" />
+                            <span>Bill</span>
                           </button>
                         ) : null}
                       </div>
@@ -965,7 +965,17 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
         cafe={cafe}
         tableNumber={selectedTableForBill?.tableNumber || ''}
         orders={selectedTableForBill?.orders || []}
-        onUpdateStatus={onUpdateStatus}
+        onMarkPaid={(() => {
+          // Same settle flow as the Paid button on the table card, so the
+          // confirmation, unserved-round warning and notice all match.
+          if (!onSettleTable || !selectedTableForBill) return undefined;
+          const card = tableCardsData.find((c) => c.tableNumber === selectedTableForBill.tableNumber);
+          if (!card || !card.openBill) return undefined;
+          // Only when the bill being shown IS the open one — a reprint of a
+          // past receipt must not settle whatever is open on the table now.
+          if (!selectedTableForBill.orders.some((o) => o.id === card.openBill!.id)) return undefined;
+          return () => handleSettleTable(card);
+        })()}
       />
 
       {/* Table Day-History Modal */}
