@@ -5,7 +5,7 @@ import { Lock, Mail, ShieldCheck, ArrowRight, Sparkles, Loader2 } from 'lucide-r
 
 interface AdminLoginProps {
   cafe: CafeInfo;
-  onLoginSuccess: (email: string, role: 'admin' | 'kitchen') => void;
+  onLoginSuccess: (email: string, role: 'admin' | 'kitchen' | 'staff') => void;
 }
 
 // The cafe owner's own instant demo access never needed a real account row —
@@ -42,9 +42,9 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
     setIsSubmitting(true);
     try {
       const account = await staffService.login(trimmedEmail, password);
-      // Only two portals exist client-side; a 'staff' role account still
-      // lands in the Kitchen KDS rather than the full admin console.
-      onLoginSuccess(account.email, account.role === 'admin' ? 'admin' : 'kitchen');
+      // The account's stored role decides which portal it opens: kitchen
+      // accounts get the KDS, admin and floor staff get the cafe console.
+      onLoginSuccess(account.email, account.role);
     } catch (err: any) {
       setErrorMsg(err.message || 'Invalid email or password');
     } finally {

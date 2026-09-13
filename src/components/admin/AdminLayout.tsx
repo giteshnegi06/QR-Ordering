@@ -29,6 +29,7 @@ import {
 
 interface AdminLayoutProps {
   cafe: CafeInfo;
+  currentUser: { email: string; role: 'admin' | 'kitchen' | 'staff' };
   orders: Order[];
   tables: TableItem[];
   categories: Category[];
@@ -63,6 +64,7 @@ type NavSection =
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({
   cafe,
+  currentUser,
   orders,
   tables,
   categories,
@@ -87,17 +89,23 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<Order | null>(null);
 
-  const navItems: { id: NavSection; label: string; icon: React.FC<{ className?: string }> }[] = [
+  // Floor staff (role 'staff') share this console for day-to-day service —
+  // orders, tables, table requests — but the sections that shape the
+  // business (menu, staff accounts, settings) stay admin-only.
+  const isAdmin = currentUser.role === 'admin';
+  type NavItem = { id: NavSection; label: string; icon: React.FC<{ className?: string }>; adminOnly?: boolean };
+  const allNavItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
     // { id: 'kitchen', label: 'Kitchen', icon: ChefHat },
-    { id: 'menu', label: 'Menu Items', icon: UtensilsCrossed },
-    { id: 'categories', label: 'Categories', icon: FolderTree },
+    { id: 'menu', label: 'Menu Items', icon: UtensilsCrossed, adminOnly: true },
+    { id: 'categories', label: 'Categories', icon: FolderTree, adminOnly: true },
     { id: 'tables', label: 'Tables', icon: TableIcon },
     { id: 'qrcodes', label: 'QR Codes', icon: QrCode },
-    { id: 'staff', label: 'Staff', icon: Users },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'staff', label: 'Staff', icon: Users, adminOnly: true },
+    { id: 'settings', label: 'Settings', icon: Settings, adminOnly: true },
   ];
+  const navItems = allNavItems.filter((item) => isAdmin || !item.adminOnly);
 
   const handleNavClick = (sectionId: NavSection) => {
     if (sectionId === 'kitchen') {
@@ -137,7 +145,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           <div className="min-w-0">
             <h1 className="font-black text-sm text-white tracking-tight truncate">{cafe.name}</h1>
             <span className="text-[10px] font-bold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
-              Admin Portal
+              {isAdmin ? 'Admin Portal' : 'Staff Portal'}
             </span>
           </div>
         </div>

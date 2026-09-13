@@ -8,6 +8,7 @@ import {
   ChefHat,
   Volume2,
   VolumeX,
+  LogOut,
   Bell,
   CheckCircle2,
   Clock,
@@ -18,9 +19,10 @@ import {
 interface KitchenViewProps {
   onSwitchToCustomer?: (tableId: string) => void;
   onSwitchToAdmin?: () => void;
+  onLogout?: () => void;
 }
 
-export const KitchenView: React.FC<KitchenViewProps> = () => {
+export const KitchenView: React.FC<KitchenViewProps> = ({ onLogout }) => {
   const [orders, setOrders] = useState<Order[]>(() => storageService.getOrders());
   const [cafe, setCafe] = useState<CafeInfo>(() => storageService.getCafe());
   const [activeTab, setActiveTab] = useState<'active' | 'received' | 'preparing' | 'ready' | 'served'>('active');
@@ -164,6 +166,19 @@ export const KitchenView: React.FC<KitchenViewProps> = () => {
             >
               <Bell className="w-4 h-4" />
             </button>
+
+            {/* Sign Out — kitchen accounts have no other way out, since the
+                console (and its sidebar sign-out) is closed to them. */}
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-stone-400 hover:text-white bg-stone-800 hover:bg-stone-700 border border-stone-700 transition-colors cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            )}
           </div>
         </div>
 

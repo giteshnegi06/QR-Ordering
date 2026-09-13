@@ -23,7 +23,54 @@ function getQRMenuTableId(): string | null {
   return null;
 }
 
+// Staff-side routes. The login page is /cafe-login; a successful sign-in
+// lands an admin on /cafe-admin and kitchen/staff accounts on /cafe-staff.
+// The old /admin and /kitchen URLs still work — they're mapped onto these.
 type StaffView = 'kitchen' | 'admin';
+
+const STAFF_ROUTES: Record<StaffView, string> = {
+  admin: '/cafe-admin',
+  kitchen: '/cafe-staff',
+};
+const LOGIN_ROUTE = '/cafe-login';
+
+// What the login page hands back: enough to know who is signed in and
+// which portal they may open.
+interface StaffSession {
+  email: string;
+  role: 'admin' | 'kitchen' | 'staff';
+}
+
+function staffViewFromUrl(): StaffView | null {
+  const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
+  const hash = window.location.hash.toLowerCase();
+  const search = window.location.search.toLowerCase();
+  if (path === '/cafe-staff' || path === '/kitchen' || hash.includes('kitchen') || search.includes('view=kitchen')) {
+    return 'kitchen';
+  }
+  if (path === '/cafe-admin' || path === '/admin') return 'admin';
+  return null;
+}
+
+// Where an account belongs: admins and floor staff work from the cafe
+// console; kitchen accounts get the kitchen display.
+function homeViewFor(session: StaffSession): StaffView {
+  return session.role === 'kitchen' ? 'kitchen' : 'admin';
+}
+
+// Whether an account is allowed into the cafe console at all.
+function canOpenConsole(session: StaffSession | null): boolean {
+  return !!session && session.role !== 'kitchen';
+}
+
+function setUrl(path: string, replace = false) {
+  try {
+    if (replace) window.history.replaceState({}, '', path);
+    else window.history.pushState({}, '', path);
+  } catch {
+    // In restricted iframe environments, history API might be sandboxed
+  }
+}
 
 export const App: React.FC = () => {
   // State from Storage Service
@@ -36,22 +83,34 @@ export const App: React.FC = () => {
   // Detect if this is a QR-scanned customer session
   const [qrTableId] = useState<string | null>(() => getQRMenuTableId());
 
-  // Staff view state (only relevant when NOT in customer QR mode)
-  const [staffView, setStaffView] = useState<StaffView>(() => {
-    const path = window.location.pathname.toLowerCase();
-    const hash = window.location.hash.toLowerCase();
-    const search = window.location.search.toLowerCase();
-
-    if (path.includes('/kitchen') || hash.includes('kitchen') || search.includes('view=kitchen')) {
-      return 'kitchen';
+  // Staff authentication state, kept for the session. Both the admin console
+  // and the kitchen display sit behind this login.
+  const [staffUser, setStaffUser] = useState<StaffSession | null>(() => {
+    try {
+      const raw = sessionStorage.getItem('cafe_staff_user');
+      return raw ? (JSON.parse(raw) as StaffSession) : null;
+    } catch {
+      return null;
     }
-    return 'admin';
   });
 
-  // Admin authentication state
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
-    return sessionStorage.getItem('cafe_admin_logged_in') === 'true';
+  // Staff view state (only relevant when NOT in customer QR mode). Resolved
+  // from the URL, but a non-admin can never land in the admin console and
+  // an unknown path goes to the account's own home.
+  const [staffView, setStaffView] = useState<StaffView>(() => {
+    const fromUrl = staffViewFromUrl();
+    if (!staffUser) return fromUrl ?? 'admin';
+    if (fromUrl === 'admin' && !canOpenConsole(staffUser)) return 'kitchen';
+    return fromUrl ?? homeViewFor(staffUser);
   });
+
+  // Keep the address bar honest: /cafe-login while signed out, and the
+  // route of whichever portal is showing once signed in.
+  useEffect(() => {
+    if (qrTableId !== null) return;
+    const wanted = staffUser ? STAFF_ROUTES[staffView] : LOGIN_ROUTE;
+    if (window.location.pathname.replace(/\/$/, '') !== wanted) setUrl(wanted, true);
+  }, [staffUser, staffView, qrTableId]);
 
   // Keep state synchronized with storageService events
   useEffect(() => {
@@ -83,31 +142,29 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Navigate between staff views and update URL
+  // Navigate between staff views and update URL. Kitchen accounts can't open
+  // the console; asking for it keeps them on the kitchen display.
   const navigateToStaffView = (view: StaffView) => {
-    setStaffView(view);
-    const newUrl = view === 'kitchen' ? '/kitchen' : '/admin';
-    try {
-      window.history.pushState({}, '', newUrl);
-    } catch (e) {
-      // In restricted iframe environments, history API might be sandboxed
-    }
+    const allowed = view === 'admin' && !canOpenConsole(staffUser) ? 'kitchen' : view;
+    setStaffView(allowed);
+    setUrl(STAFF_ROUTES[allowed]);
   };
 
-  // Admin handlers
-  const handleAdminLogin = (email: string, role: 'admin' | 'kitchen') => {
-    if (role === 'kitchen') {
-      navigateToStaffView('kitchen');
-    } else {
-      setIsAdminLoggedIn(true);
-      sessionStorage.setItem('cafe_admin_logged_in', 'true');
-      navigateToStaffView('admin');
-    }
+  // Login / logout
+  const handleStaffLogin = (email: string, role: 'admin' | 'kitchen' | 'staff') => {
+    const session: StaffSession = { email, role };
+    setStaffUser(session);
+    sessionStorage.setItem('cafe_staff_user', JSON.stringify(session));
+    const home = homeViewFor(session);
+    setStaffView(home);
+    setUrl(STAFF_ROUTES[home]);
   };
 
-  const handleAdminLogout = () => {
-    setIsAdminLoggedIn(false);
-    sessionStorage.removeItem('cafe_admin_logged_in');
+  const handleStaffLogout = () => {
+    setStaffUser(null);
+    sessionStorage.removeItem('cafe_staff_user');
+    setStaffView('admin');
+    setUrl(LOGIN_ROUTE);
   };
 
   // ─── CUSTOMER QR MENU ROUTE ───────────────────────────────────────────────
@@ -139,35 +196,40 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* Staff Interface Switcher */}
-          <div className="flex items-center gap-1 bg-stone-900 p-1 rounded-xl border border-stone-800">
-            <button
-              onClick={() => navigateToStaffView('kitchen')}
-              className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                staffView === 'kitchen'
-                  ? 'bg-amber-500 text-stone-950 shadow-xs'
-                  : 'text-stone-300 hover:text-white'
-              }`}
-            >
-              <ChefHat className="w-3.5 h-3.5" />
-              <span>Kitchen</span>
-              {orders.filter((o) => o.status === 'received' || o.status === 'preparing').length > 0 && (
-                <span className="w-2 h-2 rounded-full bg-rose-500 inline-block ml-0.5" />
-              )}
-            </button>
+          {/* Staff Interface Switcher — only once signed in. Kitchen accounts
+              only get the kitchen, so they see no console button at all. */}
+          {staffUser && (
+            <div className="flex items-center gap-1 bg-stone-900 p-1 rounded-xl border border-stone-800">
+                <button
+                  onClick={() => navigateToStaffView('kitchen')}
+                  className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    staffView === 'kitchen'
+                      ? 'bg-amber-500 text-stone-950 shadow-xs'
+                      : 'text-stone-300 hover:text-white'
+                  }`}
+                >
+                  <ChefHat className="w-3.5 h-3.5" />
+                  <span>Kitchen</span>
+                  {orders.filter((o) => o.status === 'received' || o.status === 'preparing').length > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 inline-block ml-0.5" />
+                  )}
+                </button>
 
-            <button
-              onClick={() => navigateToStaffView('admin')}
-              className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                staffView === 'admin'
-                  ? 'bg-amber-500 text-stone-950 shadow-xs'
-                  : 'text-stone-300 hover:text-white'
-              }`}
-            >
-              <Store className="w-3.5 h-3.5" />
-              <span>Cafe Admin</span>
-            </button>
-          </div>
+                {canOpenConsole(staffUser) && (
+                  <button
+                    onClick={() => navigateToStaffView('admin')}
+                    className={`px-3 py-1.5 rounded-lg font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                      staffView === 'admin'
+                        ? 'bg-amber-500 text-stone-950 shadow-xs'
+                        : 'text-stone-300 hover:text-white'
+                    }`}
+                  >
+                    <Store className="w-3.5 h-3.5" />
+                    <span>Cafe</span>
+                  </button>
+                )}
+            </div>
+          )}
 
           {/* QR scan hint */}
           {/* <div className="hidden sm:flex items-center gap-1.5 text-stone-500 text-[10px]">
@@ -177,19 +239,20 @@ export const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Staff View Router */}
+      {/* Staff View Router — everything here is behind the staff login */}
       <div className="flex-1 flex flex-col">
-        {staffView === 'kitchen' && (
+        {!staffUser ? (
+          <AdminLogin cafe={cafe} onLoginSuccess={handleStaffLogin} />
+        ) : staffView === 'kitchen' ? (
           <KitchenView
             onSwitchToCustomer={() => {}}
             onSwitchToAdmin={() => navigateToStaffView('admin')}
+            onLogout={handleStaffLogout}
           />
-        )}
-
-        {staffView === 'admin' &&
-          (isAdminLoggedIn ? (
+        ) : (
             <AdminLayout
               cafe={cafe}
+              currentUser={staffUser}
               orders={orders}
               tables={tables}
               categories={categories}
@@ -212,11 +275,9 @@ export const App: React.FC = () => {
                 window.open(`/menu/${cafe.id}/${tid}`, '_blank');
               }}
               onOpenKitchen={() => navigateToStaffView('kitchen')}
-              onLogout={handleAdminLogout}
+              onLogout={handleStaffLogout}
             />
-          ) : (
-            <AdminLogin cafe={cafe} onLoginSuccess={handleAdminLogin} />
-          ))}
+        )}
       </div>
     </div>
   );
