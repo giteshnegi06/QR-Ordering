@@ -15,6 +15,9 @@ interface ModalProps {
   // things above it stay pinned) — the body then becomes a flex column that
   // simply fills the space.
   scrollBody?: boolean;
+  // Drop the X in the title bar — for dialogs whose footer already carries
+  // a Close button, so there's one obvious way out instead of two.
+  hideCloseButton?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -25,6 +28,7 @@ export const Modal: React.FC<ModalProps> = ({
   maxWidth = 'md',
   footer,
   scrollBody = true,
+  hideCloseButton = false,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -64,15 +68,17 @@ export const Modal: React.FC<ModalProps> = ({
         role="dialog"
       >
         {title && (
-          <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-stone-100 bg-stone-50/70">
-            <h3 className="text-lg font-bold text-stone-900">{title}</h3>
-            <button
-              onClick={onClose}
-              className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 rounded-full transition-colors"
-              aria-label="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-100 bg-stone-50/70">
+            <h3 className="text-base sm:text-lg font-bold text-stone-900 min-w-0">{title}</h3>
+            {!hideCloseButton && (
+              <button
+                onClick={onClose}
+                className="shrink-0 p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 rounded-full transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
           </div>
         )}
         <div

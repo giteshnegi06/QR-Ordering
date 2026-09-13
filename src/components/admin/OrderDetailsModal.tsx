@@ -66,12 +66,14 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
             </div>
           </div>
 
-          {/* Status Change Controls */}
-          <div>
+          {/* Status Change Controls — tablet/desktop only. On a phone the
+              five buttons wrap into three rows and crowd the totals out;
+              status is changed from the Orders board there instead. */}
+          <div className="hidden sm:block">
             <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2">
               Change Order Status
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-5 gap-1.5">
               {(['received', 'preparing', 'ready', 'served', 'cancelled'] as OrderStatus[]).map(
                 (st) => (
                   <button

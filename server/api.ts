@@ -405,18 +405,26 @@ apiRouter.put('/admin-users/owner-password', async (req: Request, res: Response)
 // Verifies a staff login against admin_users. The demo "Cafe Admin" quick
 // sign-in bypasses this entirely (no account needed for the owner), but any
 // staff account created here must present the real password to get in.
+// Sign-in and password flows answer expected failures (wrong password, bad
+// token, mail not set up) with 200 + { ok: false, error } instead of a 4xx.
+// The browser logs every non-2xx fetch as a console error, so a mistyped
+// password would otherwise litter the console; the client checks `ok`.
+function authFail(res: Response, payload: { error: string }) {
+  return res.status(200).json({ ok: false, ...payload });
+}
+
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) {
-      return res.status(400).json({ error: 'Missing email or password' });
+      return authFail(res, { error: 'Missing email or password' });
     }
     const result = await query('SELECT * FROM admin_users WHERE email = $1', [
       String(email).toLowerCase().trim(),
     ]);
     const row = result.rows[0];
     if (!row || !row.password_hash || !verifyPassword(password, row.password_hash)) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return authFail(res, { error: 'Invalid email or password' });
     }
     res.json(mapStaff(row));
   } catch (err: any) {

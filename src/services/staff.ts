@@ -13,7 +13,9 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) {
+  // Auth endpoints report expected failures (wrong password, expired link)
+  // as 200 + { ok: false } so they don't show up as console errors.
+  if (!res.ok || (body && body.ok === false)) {
     throw new Error((body && body.error) || `Request failed (${res.status})`);
   }
   return body as T;

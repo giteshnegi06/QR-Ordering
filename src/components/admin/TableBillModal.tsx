@@ -57,15 +57,21 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={
-        <div className="flex items-center gap-2">
-          <Receipt className="w-5 h-5 text-amber-600" />
-          <span>Single Consolidated Table Bill</span>
-          <span className="text-xs font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md">
+        <div className="flex items-center gap-2 min-w-0">
+          <Receipt className="w-5 h-5 text-amber-600 shrink-0" />
+          {/* Short label on phones so the title, badge and nothing else
+              share one line; the full wording from tablet up. */}
+          <span className="truncate">
+            <span className="sm:hidden">Table Bill</span>
+            <span className="hidden sm:inline">Single Consolidated Table Bill</span>
+          </span>
+          <span className="shrink-0 whitespace-nowrap text-xs font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md">
             {tableNumber}
           </span>
         </div>
       }
       maxWidth="lg"
+      hideCloseButton
       footer={
         <div className="no-print flex flex-wrap items-center justify-between gap-3">
           <button

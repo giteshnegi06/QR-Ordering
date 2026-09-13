@@ -128,7 +128,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   }, {} as Record<string, number>);
 
   return (
-    <div className="min-h-screen bg-stone-100 flex flex-col md:flex-row">
+    <div className="min-h-screen bg-stone-100 flex flex-col lg:flex-row">
       {/* Sidebar for Desktop — sticky to the viewport so it stays in place
           while the main content area scrolls; scrolls its own nav list
           independently if the window is too short to fit everything.
@@ -136,7 +136,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           above this layout) — sticking to top-0 would tuck the sidebar's
           top edge behind that bar once scrolled, cutting off the brand
           header. */}
-      <aside className="hidden md:flex flex-col w-64 h-[calc(100vh-55px)] sticky top-[55px] bg-stone-900 text-stone-200 border-r border-stone-800 p-4 shrink-0 overflow-y-auto">
+      <aside className="hidden lg:flex flex-col w-64 h-[calc(100vh-55px)] sticky top-[55px] bg-stone-900 text-stone-200 border-r border-stone-800 p-4 shrink-0 overflow-y-auto">
         {/* Brand Header */}
         <div className="flex items-center gap-3 px-3 py-3 mb-4 border-b border-stone-800">
           <div className="w-10 h-10 rounded-2xl bg-amber-500 text-stone-950 flex items-center justify-center font-black">
@@ -209,8 +209,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         </div>
       </aside>
 
-      {/* Mobile Top Header */}
-      <div className="md:hidden bg-stone-900 text-white p-4 flex items-center justify-between border-b border-stone-800 sticky top-0 z-30">
+      {/* Mobile / tablet Top Header. Same sticky offset story as the sidebar:
+          App.tsx's nav bar sits above this at 53px (phone) / 57px (sm+), so
+          sticking to top-0 would slide this bar — and its menu button —
+          underneath it. */}
+      <div className="lg:hidden bg-stone-900 text-white p-4 flex items-center justify-between border-b border-stone-800 sticky top-[53px] sm:top-[57px] z-30">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center font-black">
             <Store className="w-4 h-4" />
@@ -228,7 +231,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       {/* Mobile Drawer */}
       {isMobileMenuOpen && (
-        <div className="md:hidden bg-stone-900 border-b border-stone-800 p-4 space-y-1 text-xs z-30">
+        <div className="lg:hidden bg-stone-900 border-b border-stone-800 p-4 space-y-1 text-xs z-30">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeSection === item.id;
