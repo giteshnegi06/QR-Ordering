@@ -550,8 +550,8 @@ Note: ${unserved} round${unserved > 1 ? 's are' : ' is'} still with the kitchen 
                             className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
                             title="Print Single Consolidated Bill for Table"
                           >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>Print Bill</span>
+                            <Printer className="w-4 h-4" />
+                            <span>Bill</span>
                           </button>
                         ) : card.allOrders.length > 0 ? (
                           <button

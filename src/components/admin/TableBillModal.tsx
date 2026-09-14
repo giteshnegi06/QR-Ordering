@@ -103,7 +103,7 @@ export const TableBillModal: React.FC<TableBillModalProps> = ({
               className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Bill</span>
+              <span>Bill</span>
             </button>
           </div>
         </div>
