@@ -372,34 +372,49 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
             </div>
           </div>
 
-          {/* Image URL */}
+          {/* Image Upload */}
           <div>
             <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
-              Food Image URL
+              Food Image
             </label>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                placeholder="https://images.unsplash.com/..."
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                className="flex-1 px-3 py-2 border border-stone-200 rounded-xl focus:outline-none focus:border-amber-500"
-              />
-            </div>
-            {image && (
-              <div className="mt-2 flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              {image ? (
                 <img
                   src={image}
                   alt="Preview"
-                  className="w-12 h-12 rounded-lg object-cover border"
+                  className="w-16 h-16 rounded-lg object-cover border border-stone-200"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src =
                       'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80';
                   }}
                 />
-                <span className="text-[11px] text-stone-500">Image Preview</span>
+              ) : (
+                <div className="w-16 h-16 rounded-lg border border-dashed border-stone-300 flex items-center justify-center text-stone-400">
+                  <ImageIcon size={20} />
+                </div>
+              )}
+              <div className="flex-1">
+                <label className="inline-flex items-center gap-2 px-3 py-2 border border-stone-200 rounded-xl bg-white hover:bg-stone-50 cursor-pointer text-stone-700 font-semibold">
+                  <ImageIcon size={16} />
+                  {image ? 'Change Image' : 'Upload Image'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        setImage(reader.result as string);
+                      };
+                      reader.readAsDataURL(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Available status */}
