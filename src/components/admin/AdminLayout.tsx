@@ -138,14 +138,20 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           header. */}
       <aside className="hidden lg:flex flex-col w-64 h-[calc(100vh-55px)] sticky top-[55px] bg-stone-900 text-stone-200 border-r border-stone-800 p-4 shrink-0 overflow-y-auto">
         {/* Brand Header */}
-        <div className="flex items-center gap-3 px-3 py-3 mb-4 border-b border-stone-800">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500 text-stone-950 flex items-center justify-center font-black">
-            <Store className="w-5 h-5" />
+        <div className="relative flex items-center gap-3 px-3 py-3 mb-4 border-b border-stone-800">
+          <div className="w-10 h-10 rounded-4xl bg-amber-500 text-stone-950 flex items-center justify-center font-black overflow-hidden shrink-0">
+            {cafe.logo ? (
+              <img src={cafe.logo} alt={`${cafe.name} logo`} className="w-full h-full object-cover" />
+            ) : (
+              <Store className="w-5 h-5" />
+            )}
           </div>
-          <div className="min-w-0">
-            <h1 className="font-black text-sm text-white tracking-tight truncate">{cafe.name}</h1>
-            <span className="text-[10px] font-bold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
-              {isAdmin ? 'Admin Portal' : 'Staff Portal'}
+          <div className="relative min-w-0 flex-1">
+            <h1 className="font-black text-lg text-white tracking-tight leading-tight truncate">
+              {cafe.name}
+            </h1>
+            <span className="absolute -top-3 right-5 translate-x-full text-[8px] font-bold text-amber-400 bg-amber-400/10 px-1 py-0.5 rounded border border-amber-400/20 whitespace-nowrap">
+              {isAdmin ? 'Admin' : 'Staff'}
             </span>
           </div>
         </div>
@@ -215,10 +221,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           underneath it. */}
       <div className="lg:hidden bg-stone-900 text-white p-4 flex items-center justify-between border-b border-stone-800 sticky top-[53px] sm:top-[57px] z-30">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center font-black">
-            <Store className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-4xl bg-amber-500 text-stone-950 flex items-center justify-center font-black overflow-hidden shrink-0">
+            {cafe.logo ? (
+              <img src={cafe.logo} alt={`${cafe.name} logo`} className="w-full h-full object-cover" />
+            ) : (
+              <Store className="w-4 h-4" />
+            )}
           </div>
-          <span className="font-bold text-sm tracking-tight">{cafe.name} Admin</span>
+          <span className="relative font-black text-lg tracking-tight min-w-0">
+            {cafe.name}
+            <sup className="ml-0.5 text-[8px] font-bold text-amber-400 bg-amber-400/10 px-1 py-0.5 rounded border border-amber-400/20 align-super">
+              {isAdmin ? 'Admin' : 'Staff'}
+            </sup>
+          </span>
         </div>
 
         <button
