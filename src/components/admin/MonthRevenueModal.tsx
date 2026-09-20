@@ -182,12 +182,6 @@ export const MonthRevenueModal: React.FC<MonthRevenueModalProps> = ({
                 ))}
               </div>
             </div>
-
-            <p className="text-[11px] text-stone-400 leading-relaxed">
-              Revenue is the food total plus service charge; tax is collected on behalf of the
-              government and is not counted. Cancelled orders are excluded. Days are counted in{' '}
-              {report?.timeZone}.
-            </p>
           </>
         )}
       </div>
