@@ -125,6 +125,12 @@ export const App: React.FC = () => {
     return unsubscribe;
   }, []);
 
+  // Keep the browser tab title in sync with the cafe name the admin sets
+  // in Settings, so a rename shows up immediately without a page reload.
+  useEffect(() => {
+    document.title = cafe.name ? `${cafe.name} - QR Ordering & Kitchen System` : 'QR Ordering & Kitchen System';
+  }, [cafe.name]);
+
   // Browsers block audio until a real user gesture happens on the page. This
   // must live at the app root (not inside KitchenView) because the very
   // first click a kitchen user makes is the nav click that switches INTO the

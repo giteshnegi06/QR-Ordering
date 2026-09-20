@@ -459,7 +459,6 @@ class StorageService {
         const parsed = JSON.parse(data);
         if (parsed && parsed.id !== 'negis-kitchen') {
           parsed.id = 'negis-kitchen';
-          parsed.name = "Negi's Kitchen";
           localStorage.setItem(STORAGE_KEYS.CAFE, JSON.stringify(parsed));
         }
         return parsed;
