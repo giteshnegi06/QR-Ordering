@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { CafeInfo, CartCustomization, CartItem, Category, MenuItem, Order, TableItem } from '../../types';
 import { storageService } from '../../services/storage';
@@ -38,6 +38,24 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
   // surface orders placed for that exact table, never another table's order.
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isViewingTracking, setIsViewingTracking] = useState<boolean>(false);
+
+  // Measure the sticky header's real (rendered) height so the category bar
+  // below it can stick at the correct offset. A hardcoded px offset drifts
+  // out of sync whenever the header grows/shrinks (e.g. the "Track Order"
+  // badge appearing, or the tagline wrapping), leaving the category bar
+  // hidden behind the taller/shorter header while scrolling.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      setHeaderHeight(entries[0].contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Real-time synchronization
   useEffect(() => {
@@ -359,6 +377,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
     <div className="min-h-screen bg-stone-50 pb-28">
       {/* Header */}
       <MenuHeader
+        ref={headerRef}
         cafe={cafe}
         table={currentTable}
         searchQuery={searchQuery}
@@ -414,6 +433,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({ tableId }) => {
         categories={categories}
         activeCategoryId={activeCategoryId}
         onSelectCategory={setActiveCategoryId}
+        stickyTop={headerHeight}
       />
 
       {/* Main Menu Grid */}

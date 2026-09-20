@@ -17,6 +17,10 @@ interface CategoryListProps {
   categories: Category[];
   activeCategoryId: string;
   onSelectCategory: (id: string) => void;
+  /** Pixel offset from the top of the viewport to stick below, i.e. the real
+   * rendered height of the header above it (measured, not hardcoded, since
+   * the header's height varies with its content). */
+  stickyTop?: number;
 }
 
 const getCategoryIcon = (iconName: string) => {
@@ -48,9 +52,13 @@ export const CategoryList: React.FC<CategoryListProps> = ({
   categories,
   activeCategoryId,
   onSelectCategory,
+  stickyTop = 0,
 }) => {
   return (
-    <div className="bg-stone-50/90 backdrop-blur-xs border-b border-stone-200/60 sticky top-[105px] z-20 overflow-x-auto no-scrollbar py-2.5 px-4 sm:px-6">
+    <div
+      className="bg-stone-50/90 backdrop-blur-xs border-b border-stone-200/60 sticky z-20 overflow-x-auto no-scrollbar py-2.5 px-4 sm:px-6"
+      style={{ top: stickyTop }}
+    >
       <div className="max-w-4xl mx-auto flex items-center gap-2">
         <button
           onClick={() => onSelectCategory('all')}

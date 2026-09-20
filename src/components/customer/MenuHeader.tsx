@@ -15,7 +15,7 @@ interface MenuHeaderProps {
   onViewActiveOrder?: () => void;
 }
 
-export const MenuHeader: React.FC<MenuHeaderProps> = ({
+export const MenuHeader = React.forwardRef<HTMLDivElement, MenuHeaderProps>(({
   cafe,
   table,
   searchQuery,
@@ -24,25 +24,22 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
   onToggleVegOnly,
   activeOrderCount = 0,
   onViewActiveOrder,
-}) => {
+}, ref) => {
   return (
-    <div className="bg-white border-b border-stone-200/80 sticky top-0 z-30 shadow-xs">
+    <div ref={ref} className="bg-white border-b border-stone-200/80 sticky top-0 z-30 shadow-xs">
       {/* Brand Top Bar */}
       <div className="px-4 py-3 sm:px-6 max-w-4xl mx-auto flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <img
             src={cafe.logo}
             alt={cafe.name}
-            className="w-10 h-10 rounded-xl object-cover ring-1 ring-amber-500/20 shadow-xs shrink-0"
+            className="w-12 h-12 rounded-4xl object-cover ring-1 ring-amber-500/20 shadow-xs shrink-0"
           />
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-bold text-stone-900 text-lg leading-tight tracking-tight">
                 {cafe.name}
               </h1>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                Digital Menu
-              </span>
             </div>
             <p className="text-xs text-stone-500 line-clamp-1">{cafe.tagline}</p>
           </div>
@@ -79,21 +76,23 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
             placeholder="Search pizza, coffee, momos..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm bg-stone-100 hover:bg-stone-100/80 focus:bg-white text-stone-900 rounded-xl border border-stone-200/60 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all placeholder:text-stone-400"
+            className="w-full pl-9 pr-4 py-2 text-base bg-stone-100 hover:bg-stone-100/80 focus:bg-white text-stone-900 rounded-xl border border-stone-200/60 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all placeholder:text-stone-400"
           />
         </div>
 
         {/* Veg Only Switch */}
         <button
           onClick={onToggleVegOnly}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all shrink-0 ${
+          className={`flex items-center gap-1.5 p-2.5 rounded-xl text-xs font-semibold border transition-all shrink-0 ${
             vegOnlyFilter
               ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-xs'
               : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300'
           }`}
         >
           <VegBadge type="veg" size="sm" />
-          <span>Veg Only</span>
+          <span className="hidden ">
+            Veg Only
+          </span>
         </button>
 
         {/* Need Water / Call Server — reachable from the menu, even before ordering */}
@@ -101,4 +100,6 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
       </div>
     </div>
   );
-};
+});
+
+MenuHeader.displayName = 'MenuHeader';
