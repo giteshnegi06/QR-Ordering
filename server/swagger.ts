@@ -1,13 +1,13 @@
 export const swaggerDocument = {
   openapi: '3.0.3',
   info: {
-    title: "Negi's Kitchen - QR Ordering & Kitchen System API",
+    title: "Cafe - QR Ordering & Kitchen System API",
     version: '1.0.0',
     description:
       'Production-grade RESTful API backed by Neon Serverless PostgreSQL for real-time table QR code ordering, kitchen display system (KDS), menu management, and multi-round dining tickets.',
     contact: {
-      name: "Negi's Kitchen Support",
-      email: 'admin@negiskitchen.com',
+      name: "Cafe Support",
+      email: 'cafe@admin.com',
     },
   },
   servers: [

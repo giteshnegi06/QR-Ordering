@@ -14,7 +14,7 @@ interface AdminLoginProps {
 // someone out.
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) => {
-  const [email, setEmail] = useState('admin@negiskitchen.com');
+  const [email, setEmail] = useState('cafe@admin.com');
   const [password, setPassword] = useState('admin123');
   const [role, setRole] = useState<'admin' | 'kitchen'>('admin');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -53,10 +53,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ cafe, onLoginSuccess }) 
   };
 
   const handleQuickDemoAdmin = () => {
-    setEmail('admin@negiskitchen.com');
+    setEmail('cafe@admin.com');
     setPassword('admin123');
     setRole('admin');
-    onLoginSuccess('admin@negiskitchen.com', 'admin');
+    onLoginSuccess('cafe@admin.com', 'admin');
   };
 
   return (

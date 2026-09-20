@@ -32,7 +32,7 @@ export interface NewStaffInput {
 // bypasses the server entirely for these exact values) and AdminSettings
 // (which shows this as the account email when letting the owner set a real
 // password on top of that demo door).
-export const DEMO_ADMIN_EMAIL = 'admin@negiskitchen.com';
+export const DEMO_ADMIN_EMAIL = 'cafe@admin.com';
 export const DEMO_ADMIN_PASSWORD = 'admin123';
 
 export const staffService = {
