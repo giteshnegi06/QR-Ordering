@@ -82,7 +82,7 @@ export const MonthRevenueModal: React.FC<MonthRevenueModalProps> = ({
         </span>
       }
     >
-      <div className="p-5 sm:p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+      <div className="p-5 sm:p-6 space-y-5 max-h-[70vh] overflow-y-auto no-scrollbar">
         {isLoading && (
           <div className="flex items-center justify-center gap-2 py-12 text-stone-500 text-sm font-semibold">
             <Loader2 className="w-4 h-4 animate-spin" />
