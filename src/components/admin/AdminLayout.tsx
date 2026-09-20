@@ -244,9 +244,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         </button>
       </div>
 
-      {/* Mobile Drawer */}
+      {/* Mobile Drawer — fixed/out-of-flow rather than a normal sibling of the
+          sticky header above. Inserting it into the document flow used to
+          push the header's box around the instant it opened, and mobile
+          Safari/Chrome "helpfully" re-snaps a `position: sticky` element
+          when its surrounding layout shifts like that — which is what was
+          scrolling the page up on open. Fixed positioning removes it from
+          the flow entirely, so opening/closing no longer moves anything
+          else on the page, and it stays pinned under the header — not
+          covering the rest of the screen — so the page behind it keeps
+          scrolling normally. z-20 keeps it under the header (z-30) so the
+          header — and its own close button — stays visible on top. */}
       {isMobileMenuOpen && (
-        <div className="lg:hidden bg-stone-900 border-b border-stone-800 p-4 space-y-1 text-xs z-30">
+        <div className="lg:hidden fixed top-[126px] sm:top-[130px] left-0 right-0 z-20 bg-stone-900 border-b border-stone-800 max-h-[calc(100vh-126px)] sm:max-h-[calc(100vh-130px)] overflow-y-auto p-4 space-y-1 text-xs shadow-lg">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeSection === item.id;

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { CafeInfo, MenuItem, Order, TableItem } from '../../types';
 import { MonthRevenueModal } from './MonthRevenueModal';
 import { TableRequestsBanner } from '../common/TableRequestsBanner';
+import { useTodayStart } from '../../hooks/useTodayStart';
 import {
   DollarSign,
   ShoppingBag,
@@ -49,6 +50,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [tableNotice, setTableNotice] = useState<string | null>(null);
   const tableNoticeTimeoutRef = useRef<number | null>(null);
   const [reserveMode, setReserveMode] = useState(false);
+  // Kept live so "Today's Sales" and "Recent Customer Orders" empty
+  // themselves out at midnight even if nobody touches the screen — the same
+  // day-rollover behavior the Orders page already gets from this hook.
+  const todayStart = useTodayStart();
 
   const sortedTables = useMemo(
     () => [...tables].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })),
@@ -95,11 +100,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Metric Calculations
   const metrics = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayTimestamp = today.getTime();
+    const today = new Date(todayStart);
 
-    const todayOrders = orders.filter((o) => o.createdAt >= todayTimestamp);
+    const todayOrders = orders.filter((o) => o.createdAt >= todayStart);
     const todaySales = todayOrders
       .filter((o) => o.status !== 'cancelled')
       .reduce((sum, o) => sum + (o.subtotal + (o.serviceCharge || 0)), 0);
@@ -152,11 +155,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       availableItems,
       unavailableItems,
     };
-  }, [orders, tables, menuItems]);
+  }, [orders, tables, menuItems, todayStart]);
 
   const recentOrders = useMemo(() => {
-    return [...orders].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
-  }, [orders]);
+    return orders
+      .filter((o) => o.createdAt >= todayStart)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 5);
+  }, [orders, todayStart]);
 
   return (
     <div className="space-y-6">
